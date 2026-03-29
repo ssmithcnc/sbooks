@@ -35,6 +35,14 @@ type BusinessProfileRecord = {
   manual_bank_instructions: string | null;
 };
 
+type PaymentEventInsert = {
+  invoice_id: string | null;
+  provider: string;
+  provider_event_id: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+};
+
 export async function getInvoiceByPublicId(publicId: string) {
   const supabase = getSupabaseAdmin();
 
@@ -130,13 +138,15 @@ export async function recordStripeWebhookEvent(event: Stripe.Event) {
     invoiceId = invoiceLookup?.id || null;
   }
 
-  await supabase.from("payment_events").insert({
+  const paymentEvent: PaymentEventInsert = {
     invoice_id: invoiceId,
     provider: "stripe",
     provider_event_id: event.id,
     event_type: event.type,
     payload: event as unknown as Record<string, unknown>
-  });
+  };
+
+  await (supabase.from("payment_events") as any).insert(paymentEvent);
 
   if (event.type === "checkout.session.completed" && invoiceId) {
     await supabase
