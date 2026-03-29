@@ -123,8 +123,8 @@ export async function recordStripeWebhookEvent(event: Stripe.Event) {
     const { data } = await supabase
       .from("invoices")
       .select("id")
-      .returns<{ id: string } | null>()
       .eq("public_id", publicId)
+      .returns<{ id: string } | null>()
       .maybeSingle();
     const invoiceLookup = data as { id: string } | null;
     invoiceId = invoiceLookup?.id || null;
