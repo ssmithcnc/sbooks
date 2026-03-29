@@ -5,7 +5,7 @@ import { getInvoiceByPublicId } from "@/lib/invoices";
 
 type PageProps = {
   params: Promise<{ publicId: string }>;
-  searchParams?: Promise<{ paid?: string; canceled?: string; error?: string }>;
+  searchParams?: Promise<{ paid?: string; canceled?: string; error?: string; provider?: string }>;
 };
 
 export default async function InvoicePage({ params, searchParams }: PageProps) {
