@@ -29,6 +29,12 @@ type PaymentOptionsRecord = {
   accept_venmo: boolean;
 };
 
+type BusinessProfileRecord = {
+  company_name: string | null;
+  company_email: string | null;
+  manual_bank_instructions: string | null;
+};
+
 export async function getInvoiceByPublicId(publicId: string) {
   const supabase = getSupabaseAdmin();
 
@@ -83,15 +89,18 @@ export async function getInvoiceByPublicId(publicId: string) {
   const { data: businessProfile } = await supabase
     .from("business_profiles")
     .select("company_name, company_email, manual_bank_instructions")
+    .returns<BusinessProfileRecord | null>()
     .limit(1)
     .maybeSingle();
 
+  const businessProfileRecord = businessProfile as BusinessProfileRecord | null;
+
   return {
     ...invoiceRecord,
-    manual_bank_instructions: businessProfile?.manual_bank_instructions || null,
+    manual_bank_instructions: businessProfileRecord?.manual_bank_instructions || null,
     business: {
-      company_name: businessProfile?.company_name || "S-Books",
-      company_email: businessProfile?.company_email || null
+      company_name: businessProfileRecord?.company_name || "S-Books",
+      company_email: businessProfileRecord?.company_email || null
     },
     payment_options: options || {
       accept_manual_ach: true,
