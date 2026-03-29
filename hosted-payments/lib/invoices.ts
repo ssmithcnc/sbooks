@@ -149,8 +149,8 @@ export async function recordStripeWebhookEvent(event: Stripe.Event) {
   await (supabase.from("payment_events") as any).insert(paymentEvent);
 
   if (event.type === "checkout.session.completed" && invoiceId) {
-    await supabase
-      .from("invoices")
+    await (supabase
+      .from("invoices") as any)
       .update({
         payment_status: "paid",
         status: "paid",
