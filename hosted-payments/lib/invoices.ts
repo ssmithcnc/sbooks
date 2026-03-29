@@ -67,10 +67,12 @@ export async function getInvoiceByPublicId(publicId: string) {
     return null;
   }
 
+  const invoiceRecord = invoice as InvoiceRecord;
+
   const { data: options, error: optionsError } = await supabase
     .from("invoice_payment_options")
     .select("accept_manual_ach, accept_stripe_card, accept_stripe_ach, accept_paypal, accept_venmo")
-    .eq("invoice_id", invoice.id)
+    .eq("invoice_id", invoiceRecord.id)
     .returns<PaymentOptionsRecord | null>()
     .maybeSingle();
 
@@ -85,7 +87,7 @@ export async function getInvoiceByPublicId(publicId: string) {
     .maybeSingle();
 
   return {
-    ...invoice,
+    ...invoiceRecord,
     manual_bank_instructions: businessProfile?.manual_bank_instructions || null,
     business: {
       company_name: businessProfile?.company_name || "S-Books",
