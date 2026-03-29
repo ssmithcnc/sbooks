@@ -30,6 +30,9 @@ export default function HomePage() {
             <Link className="btn primary" href="/invoice/demo-invoice">
               Open demo invoice page
             </Link>
+            <Link className="btn secondary" href="/receipts">
+              Open receipt library
+            </Link>
             <Link className="btn secondary" href="/receipts/upload">
               Open receipt upload
             </Link>

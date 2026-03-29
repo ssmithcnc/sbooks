@@ -3,7 +3,10 @@ import { randomUUID } from "crypto";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 type ReceiptUploadInput = {
-  file: File;
+  objectPath: string;
+  originalFileName?: string | null;
+  mimeType?: string | null;
+  byteSize?: number | null;
   vendorName?: string | null;
   receiptDate?: string | null;
   totalAmount?: string | null;
@@ -15,6 +18,23 @@ type BusinessProfileRow = {
   id: string;
   slug: string;
   company_name: string;
+};
+
+type ReceiptUploadRow = {
+  id: string;
+  object_path: string;
+  vendor_name: string | null;
+  receipt_date: string | null;
+  total_amount: number | null;
+  status: string;
+  created_at: string;
+  metadata: {
+    mime_type?: string | null;
+    original_filename?: string | null;
+    byte_size?: number | null;
+    notes?: string | null;
+    contact_email?: string | null;
+  } | null;
 };
 
 function clean(value: string | null | undefined) {
@@ -47,30 +67,77 @@ async function getDefaultBusinessProfile() {
   return profile;
 }
 
-export async function saveReceiptUpload(input: ReceiptUploadInput) {
+export async function listReceiptUploads(limit = 50) {
   const profile = await getDefaultBusinessProfile();
   const supabase = getSupabaseAdmin();
 
-  const fileName = safeFileName(input.file.name);
-  const today = new Date().toISOString().slice(0, 10);
-  const objectPath = `${profile.slug}/${today}/${randomUUID()}-${fileName}`;
-  const bytes = Buffer.from(await input.file.arrayBuffer());
+  const { data, error } = await (supabase.from("receipt_uploads") as any)
+    .select("id, object_path, vendor_name, receipt_date, total_amount, status, created_at, metadata")
+    .eq("business_profile_id", profile.id)
+    .order("created_at", { ascending: false })
+    .limit(limit);
 
-  const { error: storageError } = await supabase.storage
-    .from("receipts")
-    .upload(objectPath, bytes, {
-      contentType: input.file.type || "application/octet-stream",
-      upsert: false,
-    });
-
-  if (storageError) {
-    throw storageError;
+  if (error) {
+    throw error;
   }
 
+  const rows = ((data || []) as ReceiptUploadRow[]).map(async (row) => {
+    const mimeType = row.metadata?.mime_type || "";
+    const originalName = row.metadata?.original_filename || row.object_path.split("/").pop() || "receipt";
+    const isImage = mimeType.startsWith("image/");
+    const isPdf = mimeType === "application/pdf";
+
+    const { data: signed } = await supabase.storage
+      .from("receipts")
+      .createSignedUrl(row.object_path, 60 * 60);
+
+    return {
+      ...row,
+      original_name: originalName,
+      mime_type: mimeType,
+      is_image: isImage,
+      is_pdf: isPdf,
+      signed_url: signed?.signedUrl || null,
+    };
+  });
+
+  return Promise.all(rows);
+}
+
+export async function createReceiptUploadTarget(input: {
+  fileName?: string | null;
+  contentType?: string | null;
+}) {
+  const profile = await getDefaultBusinessProfile();
+  const supabase = getSupabaseAdmin();
+
+  const fileName = safeFileName(input.fileName);
+  const today = new Date().toISOString().slice(0, 10);
+  const objectPath = `${profile.slug}/${today}/${randomUUID()}-${fileName}`;
+
+  const { data, error } = await supabase.storage
+    .from("receipts")
+    .createSignedUploadUrl(objectPath);
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    objectPath,
+    token: data.token,
+    businessName: profile.company_name,
+  };
+}
+
+export async function finalizeReceiptUpload(input: ReceiptUploadInput) {
+  const profile = await getDefaultBusinessProfile();
+  const supabase = getSupabaseAdmin();
+
   const metadata = {
-    original_filename: input.file.name,
-    mime_type: input.file.type || "application/octet-stream",
-    byte_size: input.file.size,
+    original_filename: clean(input.originalFileName) || null,
+    mime_type: clean(input.mimeType) || "application/octet-stream",
+    byte_size: typeof input.byteSize === "number" ? input.byteSize : null,
     notes: clean(input.notes) || null,
     contact_email: clean(input.contactEmail) || null,
   };
@@ -83,7 +150,7 @@ export async function saveReceiptUpload(input: ReceiptUploadInput) {
       business_profile_id: profile.id,
       source: "mobile-web",
       bucket_name: "receipts",
-      object_path: objectPath,
+      object_path: input.objectPath,
       vendor_name: clean(input.vendorName) || null,
       receipt_date: clean(input.receiptDate) || null,
       total_amount: Number.isFinite(parsedTotal) ? parsedTotal : null,

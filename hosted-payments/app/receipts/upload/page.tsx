@@ -1,3 +1,5 @@
+import { ReceiptUploadForm } from "@/components/receipt-upload-form";
+
 type SearchParams = {
   uploaded?: string;
   receipt?: string;
@@ -37,53 +39,12 @@ export default async function ReceiptUploadPage({
             This first version stores the file and the basic receipt details so we can layer OCR and email intake on top next.
           </p>
 
-          {resolvedSearch?.uploaded === "1" ? (
-            <div className="notice good">
-              Receipt uploaded successfully.
-              <div className="notice-detail">
-                Receipt ID: {resolvedSearch.receipt} <br />
-                Stored at: {resolvedSearch.path}
-              </div>
-            </div>
-          ) : null}
-
-          {resolvedSearch?.error ? (
-            <div className="notice bad">
-              {resolvedSearch.error}
-            </div>
-          ) : null}
-
-          <form action="/api/receipts/upload" method="post" encType="multipart/form-data" className="receipt-form">
-            <label className="field">
-              <span>Receipt photo or PDF</span>
-              <input type="file" name="receipt_file" accept="image/*,application/pdf" capture="environment" required />
-            </label>
-            <label className="field">
-              <span>Vendor name</span>
-              <input type="text" name="vendor_name" placeholder="Home Depot, Shell, UPS..." />
-            </label>
-            <div className="field-row">
-              <label className="field">
-                <span>Receipt date</span>
-                <input type="date" name="receipt_date" />
-              </label>
-              <label className="field">
-                <span>Total amount</span>
-                <input type="number" name="total_amount" step="0.01" min="0" placeholder="0.00" />
-              </label>
-            </div>
-            <label className="field">
-              <span>Contact email</span>
-              <input type="email" name="contact_email" placeholder="Optional follow-up contact" />
-            </label>
-            <label className="field">
-              <span>Notes</span>
-              <textarea name="notes" rows={4} placeholder="Job name, customer, card used, or any note that helps bucket it later." />
-            </label>
-            <div className="cta-row">
-              <button className="btn primary" type="submit">Upload receipt</button>
-            </div>
-          </form>
+          <ReceiptUploadForm
+            initialUploaded={resolvedSearch?.uploaded === "1"}
+            initialReceiptId={resolvedSearch?.receipt}
+            initialPath={resolvedSearch?.path}
+            initialError={resolvedSearch?.error}
+          />
         </article>
 
         <aside className="card muted">
@@ -95,6 +56,11 @@ export default async function ReceiptUploadPage({
           </div>
           <div className="footer-note">
             Best results on a phone: open this page, take a photo, then upload it immediately after the purchase.
+          </div>
+          <div className="cta-row">
+            <a className="btn secondary" href="/receipts">
+              View all uploaded receipts
+            </a>
           </div>
         </aside>
       </section>
