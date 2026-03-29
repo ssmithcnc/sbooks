@@ -173,5 +173,8 @@ export async function verifyPayPalWebhook(args: {
 }
 
 export function approvalLink(order: PayPalOrderResponse) {
-  return order.links?.find((link) => link.rel === "approve")?.href || null;
+  return (
+    order.links?.find((link) => link.rel === "approve" || link.rel === "payer-action")?.href ||
+    null
+  );
 }
