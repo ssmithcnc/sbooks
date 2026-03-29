@@ -33,3 +33,28 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(errorUrl, { status: 303 });
   }
 }
+
+export async function POST(request: NextRequest) {
+  const baseUrl = process.env.NEXT_PUBLIC_APP_BASE_URL || "";
+
+  try {
+    const body = (await request.json()) as { publicId?: string; orderId?: string };
+    const publicId = String(body?.publicId || "").trim();
+    const orderId = String(body?.orderId || "").trim();
+
+    if (!baseUrl || !publicId || !orderId) {
+      return NextResponse.json({ ok: false, error: "Invalid PayPal capture request." }, { status: 400 });
+    }
+
+    const order = await capturePayPalOrder(orderId);
+    await recordPayPalOrderCapture(publicId, order);
+
+    const successUrl = new URL(`/invoice/${publicId}`, baseUrl);
+    successUrl.searchParams.set("paid", "1");
+    successUrl.searchParams.set("provider", "paypal");
+    return NextResponse.json({ ok: true, redirectUrl: successUrl.toString() });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown PayPal capture error.";
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
+}

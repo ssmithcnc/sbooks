@@ -213,6 +213,48 @@ a {
   box-shadow: 0 16px 32px rgba(0, 74, 171, 0.22);
 }
 
+.paypal-block {
+  display: grid;
+  gap: 10px;
+  min-width: min(100%, 360px);
+}
+
+.paypal-headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.paypal-venmo-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 10px 18px rgba(0, 48, 135, 0.18);
+}
+
+.paypal-label {
+  color: var(--ink-soft);
+}
+
+.paypal-buttons-slot {
+  min-height: 46px;
+}
+
+.paypal-helper,
+.paypal-error {
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.paypal-helper {
+  color: var(--ink-soft);
+}
+
+.paypal-error {
+  color: #b42318;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;

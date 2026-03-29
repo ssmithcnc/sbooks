@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { PayPalButtons } from "@/components/paypal-buttons";
 import { getInvoiceByPublicId } from "@/lib/invoices";
 
 type PageProps = {
@@ -19,6 +20,7 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
     style: "currency",
     currency: invoice.currency ?? "USD"
   }).format(Number(invoice.total || 0));
+  const paypalClientId = process.env.PAYPAL_CLIENT_ID || "";
 
   return (
     <main className="shell">
@@ -90,17 +92,20 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
                 <button className="btn secondary" type="submit">Pay by ACH</button>
               </form>
             ) : null}
-            {(invoice.payment_options.accept_paypal || invoice.payment_options.accept_venmo) ? (
-              <form action="/api/paypal/create-order" method="post">
-                <input type="hidden" name="publicId" value={publicId} />
-                <button className="btn paypal" type="submit">
-                  {invoice.payment_options.accept_paypal && invoice.payment_options.accept_venmo
-                    ? "Pay with PayPal / Venmo"
+            {(invoice.payment_options.accept_paypal || invoice.payment_options.accept_venmo) && paypalClientId ? (
+              <PayPalButtons
+                clientId={paypalClientId}
+                publicId={publicId}
+                currency={invoice.currency || "USD"}
+                showVenmo={Boolean(invoice.payment_options.accept_venmo)}
+                buttonLabel={
+                  invoice.payment_options.accept_paypal && invoice.payment_options.accept_venmo
+                    ? "Pay with PayPal or Venmo"
                     : invoice.payment_options.accept_venmo
                       ? "Pay with Venmo"
-                      : "Pay with PayPal"}
-                </button>
-              </form>
+                      : "Pay with PayPal"
+                }
+              />
             ) : null}
           </div>
         </article>

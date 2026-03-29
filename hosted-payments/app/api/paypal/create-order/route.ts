@@ -10,8 +10,14 @@ function getValue(formData: FormData, key: string) {
 export async function POST(request: NextRequest) {
   let publicId = "";
   try {
-    const formData = await request.formData();
-    publicId = getValue(formData, "publicId");
+    const contentType = request.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const body = (await request.json()) as { publicId?: string };
+      publicId = String(body?.publicId || "").trim();
+    } else {
+      const formData = await request.formData();
+      publicId = getValue(formData, "publicId");
+    }
 
     if (!publicId) {
       return NextResponse.json({ ok: false, error: "Invoice id is required." }, { status: 400 });
@@ -40,6 +46,15 @@ export async function POST(request: NextRequest) {
     });
 
     const approveUrl = approvalLink(order);
+    const acceptsJson = (request.headers.get("accept") || "").includes("application/json");
+    if (acceptsJson) {
+      return NextResponse.json({
+        ok: true,
+        orderId: order.id,
+        approveUrl
+      });
+    }
+
     if (!approveUrl) {
       return NextResponse.json({ ok: false, error: "PayPal did not return an approval URL." }, { status: 500 });
     }
