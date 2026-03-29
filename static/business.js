@@ -87,10 +87,17 @@ function setEmailSendStatus(message, tone = "") {
   if (tone === "bad") el.classList.add("status-bad");
 }
 
+function asCheckedValue(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const text = String(value ?? "").trim().toLowerCase();
+  return ["1", "true", "yes", "y", "on"].includes(text);
+}
+
 function setFormValues(form, values) {
   Array.from(form.elements).forEach((el) => {
     if (!el.name) return;
-    if (el.type === "checkbox") el.checked = Boolean(values[el.name]);
+    if (el.type === "checkbox") el.checked = asCheckedValue(values[el.name]);
     else el.value = values[el.name] ?? "";
   });
 }
@@ -108,6 +115,14 @@ function formToObject(form) {
 function renderSettings() {
   setFormValues($("#settingsForm"), state.settings);
   updateSmtpProviderHint();
+}
+
+function documentPaymentSyncMeta(document) {
+  if (!document) return "Desktop-only until you publish this invoice to the hosted payment service.";
+  if (!document.cloud_public_id) return "Desktop-only until you publish this invoice to the hosted payment service.";
+  const status = document.cloud_sync_status || "synced";
+  const syncedAt = document.cloud_synced_at ? ` on ${document.cloud_synced_at}` : "";
+  return `Hosted payment ID ${document.cloud_public_id} | sync status: ${status}${syncedAt}`;
 }
 
 function renderCustomers() {
@@ -169,7 +184,7 @@ function renderDocuments() {
       <td>${escapeHtml(d.issue_date || "")}</td>
       <td>${escapeHtml(d.status || "")}</td>
       <td>${fmtMoney(d.total)}</td>
-      <td>${d.imported ? "Imported" : ""}</td>
+      <td>${d.cloud_public_id ? `Hosted: ${escapeHtml(d.cloud_sync_status || "synced")}` : (d.imported ? "Imported" : "Local")}</td>
       <td class="row-actions">
         <button class="btn btn-secondary" type="button" data-edit-document="${d.id}">Edit</button>
         ${d.type === "estimate" ? `<button class="btn btn-secondary" type="button" data-convert-document="${d.id}">Convert</button>` : ``}
@@ -266,7 +281,13 @@ function resetDocumentForm() {
     tax_rate: state.settings.default_tax_rate || 0,
     notes: "",
     terms: state.settings.default_terms || "",
+    accept_manual_ach: asCheckedValue(state.settings.default_accept_manual_ach),
+    accept_stripe_card: asCheckedValue(state.settings.default_accept_stripe_card),
+    accept_stripe_ach: asCheckedValue(state.settings.default_accept_stripe_ach),
+    accept_paypal: asCheckedValue(state.settings.default_accept_paypal),
+    accept_venmo: asCheckedValue(state.settings.default_accept_venmo),
   });
+  $("#documentPaymentSyncMeta").textContent = documentPaymentSyncMeta(null);
   renderDocumentLines([emptyLine()]);
 }
 
@@ -441,7 +462,13 @@ async function editDocument(id) {
     tax_rate: document.tax_rate,
     notes: document.notes || "",
     terms: document.terms || "",
+    accept_manual_ach: document.accept_manual_ach,
+    accept_stripe_card: document.accept_stripe_card,
+    accept_stripe_ach: document.accept_stripe_ach,
+    accept_paypal: document.accept_paypal,
+    accept_venmo: document.accept_venmo,
   });
+  $("#documentPaymentSyncMeta").textContent = documentPaymentSyncMeta(document);
   renderDocumentLines(document.lines || [emptyLine()]);
   window.scrollTo({ top: $("#documentForm").offsetTop - 80, behavior: "smooth" });
 }

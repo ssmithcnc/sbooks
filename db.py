@@ -152,6 +152,14 @@ CREATE TABLE IF NOT EXISTS documents (
   source_system TEXT,
   source_id TEXT,
   payment_url TEXT,
+  cloud_public_id TEXT,
+  cloud_sync_status TEXT NOT NULL DEFAULT 'local_only',
+  cloud_synced_at TEXT,
+  accept_manual_ach INTEGER NOT NULL DEFAULT 1,
+  accept_stripe_card INTEGER NOT NULL DEFAULT 1,
+  accept_stripe_ach INTEGER NOT NULL DEFAULT 1,
+  accept_paypal INTEGER NOT NULL DEFAULT 0,
+  accept_venmo INTEGER NOT NULL DEFAULT 0,
   last_sent_at TEXT,
   last_sent_to TEXT,
   last_email_error TEXT,
@@ -224,6 +232,18 @@ def init_db():
       "smtp_use_tls": "1",
       "smtp_from_name": "",
       "invoice_payment_url_base": "",
+      "supabase_url": "",
+      "supabase_publishable_key": "",
+      "supabase_secret_key": "",
+      "stripe_publishable_key": "",
+      "stripe_secret_key": "",
+      "stripe_webhook_secret": "",
+      "manual_bank_instructions": "",
+      "default_accept_manual_ach": "1",
+      "default_accept_stripe_card": "1",
+      "default_accept_stripe_ach": "1",
+      "default_accept_paypal": "0",
+      "default_accept_venmo": "0",
       "invoice_prefix": "INV-",
       "estimate_prefix": "EST-",
       "next_invoice_number": "1001",
@@ -353,6 +373,22 @@ def migrate_db(conn):
     cols = [r[1] for r in conn.execute("PRAGMA table_info(documents)").fetchall()]
     if "payment_url" not in cols:
       conn.execute("ALTER TABLE documents ADD COLUMN payment_url TEXT")
+    if "cloud_public_id" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN cloud_public_id TEXT")
+    if "cloud_sync_status" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN cloud_sync_status TEXT NOT NULL DEFAULT 'local_only'")
+    if "cloud_synced_at" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN cloud_synced_at TEXT")
+    if "accept_manual_ach" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN accept_manual_ach INTEGER NOT NULL DEFAULT 1")
+    if "accept_stripe_card" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN accept_stripe_card INTEGER NOT NULL DEFAULT 1")
+    if "accept_stripe_ach" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN accept_stripe_ach INTEGER NOT NULL DEFAULT 1")
+    if "accept_paypal" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN accept_paypal INTEGER NOT NULL DEFAULT 0")
+    if "accept_venmo" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN accept_venmo INTEGER NOT NULL DEFAULT 0")
     if "last_sent_at" not in cols:
       conn.execute("ALTER TABLE documents ADD COLUMN last_sent_at TEXT")
     if "last_sent_to" not in cols:

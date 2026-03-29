@@ -62,6 +62,18 @@ BUSINESS_SETTINGS_DEFAULTS = {
   "smtp_use_tls": "1",
   "smtp_from_name": "",
   "invoice_payment_url_base": "",
+  "supabase_url": "",
+  "supabase_publishable_key": "",
+  "supabase_secret_key": "",
+  "stripe_publishable_key": "",
+  "stripe_secret_key": "",
+  "stripe_webhook_secret": "",
+  "manual_bank_instructions": "",
+  "default_accept_manual_ach": "1",
+  "default_accept_stripe_card": "1",
+  "default_accept_stripe_ach": "1",
+  "default_accept_paypal": "0",
+  "default_accept_venmo": "0",
   "invoice_prefix": "INV-",
   "estimate_prefix": "EST-",
   "next_invoice_number": "1001",
@@ -334,6 +346,10 @@ def next_document_number(conn, doc_type: str) -> str:
   return number
 
 
+def document_table_columns(conn) -> set[str]:
+  return {row[1] for row in conn.execute("PRAGMA table_info(documents)").fetchall()}
+
+
 def calculate_document_totals(lines: list[dict], tax_rate: float) -> tuple[float, float, float]:
   subtotal = 0.0
   taxable_subtotal = 0.0
@@ -406,6 +422,9 @@ def fetch_document(conn, document_id: int):
   ).fetchone()
   if not doc:
     return None
+  doc_keys = set(doc.keys())
+  def doc_value(key, default=None):
+    return doc[key] if key in doc_keys else default
   lines = conn.execute(
     """SELECT dl.*, p.name AS product_name, p.sku AS product_sku
        FROM document_lines dl
@@ -431,10 +450,18 @@ def fetch_document(conn, document_id: int):
     "imported": bool(doc["imported"]),
     "source_system": doc["source_system"],
     "source_id": doc["source_id"],
-    "payment_url": doc["payment_url"],
-    "last_sent_at": doc["last_sent_at"],
-    "last_sent_to": doc["last_sent_to"],
-    "last_email_error": doc["last_email_error"],
+    "payment_url": doc_value("payment_url"),
+    "cloud_public_id": doc_value("cloud_public_id"),
+    "cloud_sync_status": doc_value("cloud_sync_status", "local_only") or "local_only",
+    "cloud_synced_at": doc_value("cloud_synced_at"),
+    "accept_manual_ach": bool(doc_value("accept_manual_ach", 1)),
+    "accept_stripe_card": bool(doc_value("accept_stripe_card", 1)),
+    "accept_stripe_ach": bool(doc_value("accept_stripe_ach", 1)),
+    "accept_paypal": bool(doc_value("accept_paypal", 0)),
+    "accept_venmo": bool(doc_value("accept_venmo", 0)),
+    "last_sent_at": doc_value("last_sent_at"),
+    "last_sent_to": doc_value("last_sent_to"),
+    "last_email_error": doc_value("last_email_error"),
     "converted_from_document_id": doc["converted_from_document_id"],
     "created_at": doc["created_at"],
     "updated_at": doc["updated_at"],
@@ -503,7 +530,8 @@ def build_document_payload(conn, payload: dict, existing: dict | None = None) ->
   if not lines:
     raise ValueError("At least one line item is required")
 
-  tax_rate = parse_float(payload.get("tax_rate"), parse_float((existing or {}).get("tax_rate"), parse_float(business_settings_dict(conn).get("default_tax_rate", "0"))))
+  settings = business_settings_dict(conn)
+  tax_rate = parse_float(payload.get("tax_rate"), parse_float((existing or {}).get("tax_rate"), parse_float(settings.get("default_tax_rate", "0"))))
   subtotal, tax_amount, total = calculate_document_totals(lines, tax_rate)
   status = clean_text(payload.get("status") or (existing or {}).get("status") or ("draft" if doc_type == "estimate" else "draft"))
   if doc_type == "estimate":
@@ -527,11 +555,19 @@ def build_document_payload(conn, payload: dict, existing: dict | None = None) ->
     "tax_amount": tax_amount,
     "total": total,
     "notes": clean_text(payload.get("notes") or (existing or {}).get("notes")),
-    "terms": clean_text(payload.get("terms") or (existing or {}).get("terms") or business_settings_dict(conn).get("default_terms", "")),
+    "terms": clean_text(payload.get("terms") or (existing or {}).get("terms") or settings.get("default_terms", "")),
     "imported": int(bool(payload.get("imported", (existing or {}).get("imported", False)))),
     "source_system": clean_text(payload.get("source_system") or (existing or {}).get("source_system")) or None,
     "source_id": clean_text(payload.get("source_id") or (existing or {}).get("source_id")) or None,
     "converted_from_document_id": payload.get("converted_from_document_id", (existing or {}).get("converted_from_document_id")),
+    "cloud_public_id": clean_text(payload.get("cloud_public_id") or (existing or {}).get("cloud_public_id")) or None,
+    "cloud_sync_status": clean_text(payload.get("cloud_sync_status") or (existing or {}).get("cloud_sync_status") or "local_only") or "local_only",
+    "cloud_synced_at": clean_text(payload.get("cloud_synced_at") or (existing or {}).get("cloud_synced_at")) or None,
+    "accept_manual_ach": int(parse_bool(payload.get("accept_manual_ach", (existing or {}).get("accept_manual_ach", settings.get("default_accept_manual_ach", "1"))), True)),
+    "accept_stripe_card": int(parse_bool(payload.get("accept_stripe_card", (existing or {}).get("accept_stripe_card", settings.get("default_accept_stripe_card", "1"))), True)),
+    "accept_stripe_ach": int(parse_bool(payload.get("accept_stripe_ach", (existing or {}).get("accept_stripe_ach", settings.get("default_accept_stripe_ach", "1"))), True)),
+    "accept_paypal": int(parse_bool(payload.get("accept_paypal", (existing or {}).get("accept_paypal", settings.get("default_accept_paypal", "0"))), False)),
+    "accept_venmo": int(parse_bool(payload.get("accept_venmo", (existing or {}).get("accept_venmo", settings.get("default_accept_venmo", "0"))), False)),
     "lines": lines,
   }
 
@@ -539,34 +575,51 @@ def build_document_payload(conn, payload: dict, existing: dict | None = None) ->
 def save_document(conn, payload: dict, document_id: int | None = None) -> int:
   existing = fetch_document(conn, document_id) if document_id else None
   doc = build_document_payload(conn, payload, existing)
+  available_columns = document_table_columns(conn)
+  base_values = {
+    "type": doc["type"],
+    "number": doc["number"],
+    "customer_id": doc["customer_id"],
+    "issue_date": doc["issue_date"],
+    "due_date": doc["due_date"],
+    "status": doc["status"],
+    "subtotal": doc["subtotal"],
+    "tax_rate": doc["tax_rate"],
+    "tax_amount": doc["tax_amount"],
+    "total": doc["total"],
+    "notes": doc["notes"],
+    "terms": doc["terms"],
+    "imported": doc["imported"],
+    "source_system": doc["source_system"],
+    "source_id": doc["source_id"],
+    "cloud_public_id": doc["cloud_public_id"],
+    "cloud_sync_status": doc["cloud_sync_status"],
+    "cloud_synced_at": doc["cloud_synced_at"],
+    "accept_manual_ach": doc["accept_manual_ach"],
+    "accept_stripe_card": doc["accept_stripe_card"],
+    "accept_stripe_ach": doc["accept_stripe_ach"],
+    "accept_paypal": doc["accept_paypal"],
+    "accept_venmo": doc["accept_venmo"],
+    "converted_from_document_id": doc["converted_from_document_id"],
+  }
+  persisted_values = {key: value for key, value in base_values.items() if key in available_columns}
   if document_id:
+    persisted_values["updated_at"] = now_iso()
+    assignments = ", ".join(f"{column}=?" for column in persisted_values.keys())
     conn.execute(
-      """UPDATE documents
-         SET type=?, number=?, customer_id=?, issue_date=?, due_date=?, status=?,
-             subtotal=?, tax_rate=?, tax_amount=?, total=?, notes=?, terms=?,
-             imported=?, source_system=?, source_id=?, converted_from_document_id=?, updated_at=?
-         WHERE id=?""",
-      (
-        doc["type"], doc["number"], doc["customer_id"], doc["issue_date"], doc["due_date"], doc["status"],
-        doc["subtotal"], doc["tax_rate"], doc["tax_amount"], doc["total"], doc["notes"], doc["terms"],
-        doc["imported"], doc["source_system"], doc["source_id"], doc["converted_from_document_id"], now_iso(),
-        document_id,
-      )
+      f"UPDATE documents SET {assignments} WHERE id=?",
+      tuple(persisted_values.values()) + (document_id,)
     )
     conn.execute("DELETE FROM document_lines WHERE document_id=?", (document_id,))
     target_id = document_id
   else:
+    persisted_values["created_at"] = now_iso()
+    persisted_values["updated_at"] = now_iso()
+    columns = list(persisted_values.keys())
+    placeholders = ", ".join("?" for _ in columns)
     cur = conn.execute(
-      """INSERT INTO documents
-         (type, number, customer_id, issue_date, due_date, status, subtotal, tax_rate, tax_amount, total,
-          notes, terms, imported, source_system, source_id, converted_from_document_id, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-      (
-        doc["type"], doc["number"], doc["customer_id"], doc["issue_date"], doc["due_date"], doc["status"],
-        doc["subtotal"], doc["tax_rate"], doc["tax_amount"], doc["total"], doc["notes"], doc["terms"],
-        doc["imported"], doc["source_system"], doc["source_id"], doc["converted_from_document_id"],
-        now_iso(), now_iso(),
-      )
+      f"INSERT INTO documents ({', '.join(columns)}) VALUES ({placeholders})",
+      tuple(persisted_values[column] for column in columns)
     )
     target_id = cur.lastrowid
 
@@ -1745,19 +1798,40 @@ def delete_product(product_id: int):
 @app.get("/api/documents")
 def list_documents():
   doc_type = request.args.get("type")
-  q = """SELECT d.id, d.type, d.number, d.issue_date, d.due_date, d.status,
-                d.subtotal, d.tax_rate, d.tax_amount, d.total, d.imported,
-                d.source_system, d.source_id, d.payment_url, d.last_sent_at, d.last_sent_to,
-                c.name AS customer_name
-         FROM documents d
-         JOIN customers c ON c.id = d.customer_id
-         WHERE 1=1"""
-  params = []
-  if doc_type in {"estimate", "invoice"}:
-    q += " AND d.type=?"
-    params.append(doc_type)
-  q += " ORDER BY d.issue_date DESC, d.id DESC"
   with db() as conn:
+    available = document_table_columns(conn)
+    selected = [
+      "d.id", "d.type", "d.number", "d.issue_date", "d.due_date", "d.status",
+      "d.subtotal", "d.tax_rate", "d.tax_amount", "d.total", "d.imported",
+      "d.source_system", "d.source_id",
+    ]
+    optional_defaults = {
+      "payment_url": "NULL",
+      "cloud_public_id": "NULL",
+      "cloud_sync_status": "'local_only'",
+      "cloud_synced_at": "NULL",
+      "accept_manual_ach": "1",
+      "accept_stripe_card": "1",
+      "accept_stripe_ach": "1",
+      "accept_paypal": "0",
+      "accept_venmo": "0",
+      "last_sent_at": "NULL",
+      "last_sent_to": "NULL",
+    }
+    for column, fallback in optional_defaults.items():
+      if column in available:
+        selected.append(f"d.{column}")
+      else:
+        selected.append(f"{fallback} AS {column}")
+    q = f"""SELECT {', '.join(selected)}, c.name AS customer_name
+            FROM documents d
+            JOIN customers c ON c.id = d.customer_id
+            WHERE 1=1"""
+    params = []
+    if doc_type in {"estimate", "invoice"}:
+      q += " AND d.type=?"
+      params.append(doc_type)
+    q += " ORDER BY d.issue_date DESC, d.id DESC"
     rows = conn.execute(q, params).fetchall()
   items = []
   for row in rows:
@@ -1777,6 +1851,14 @@ def list_documents():
       "source_id": row["source_id"],
       "customer_name": row["customer_name"],
       "payment_url": row["payment_url"] if "payment_url" in row.keys() else None,
+      "cloud_public_id": row["cloud_public_id"] if "cloud_public_id" in row.keys() else None,
+      "cloud_sync_status": row["cloud_sync_status"] if "cloud_sync_status" in row.keys() else "local_only",
+      "cloud_synced_at": row["cloud_synced_at"] if "cloud_synced_at" in row.keys() else None,
+      "accept_manual_ach": bool(row["accept_manual_ach"]) if "accept_manual_ach" in row.keys() else True,
+      "accept_stripe_card": bool(row["accept_stripe_card"]) if "accept_stripe_card" in row.keys() else True,
+      "accept_stripe_ach": bool(row["accept_stripe_ach"]) if "accept_stripe_ach" in row.keys() else True,
+      "accept_paypal": bool(row["accept_paypal"]) if "accept_paypal" in row.keys() else False,
+      "accept_venmo": bool(row["accept_venmo"]) if "accept_venmo" in row.keys() else False,
       "last_sent_at": row["last_sent_at"] if "last_sent_at" in row.keys() else None,
       "last_sent_to": row["last_sent_to"] if "last_sent_to" in row.keys() else None,
     })

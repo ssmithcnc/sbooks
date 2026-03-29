@@ -47,11 +47,32 @@
         <label>Payment page base URL
           <input type="text" name="invoice_payment_url_base" placeholder="Leave blank to use local /pay page" />
         </label>
+        <label>Supabase project URL
+          <input type="text" name="supabase_url" placeholder="https://your-project.supabase.co" />
+        </label>
+        <label>Supabase publishable key
+          <input type="password" name="supabase_publishable_key" />
+        </label>
+        <label>Supabase secret key
+          <input type="password" name="supabase_secret_key" />
+        </label>
+        <label>Stripe publishable key
+          <input type="password" name="stripe_publishable_key" />
+        </label>
+        <label>Stripe secret key
+          <input type="password" name="stripe_secret_key" />
+        </label>
+        <label>Stripe webhook secret
+          <input type="password" name="stripe_webhook_secret" />
+        </label>
         <label class="full">Company logo path
           <input type="text" name="company_logo_path" placeholder="C:\Users\smith\Downloads\logo.png" />
         </label>
         <label class="full">Company address
           <textarea name="company_address" rows="3"></textarea>
+        </label>
+        <label class="full">Manual ACH / bank transfer instructions
+          <textarea name="manual_bank_instructions" rows="4" placeholder="Bank name, routing instructions, remittance note, and where to send payment confirmation."></textarea>
         </label>
         <label>Estimate prefix
           <input type="text" name="estimate_prefix" />
@@ -96,6 +117,30 @@
         <label class="checkboxline">
           <input type="checkbox" name="smtp_use_tls" checked />
           <span>Use STARTTLS (turn off for implicit SSL on port 465)</span>
+        </label>
+        <div class="full">
+          <b>Default invoice payment methods</b>
+          <div class="muted" style="margin-top:6px;">These become the starting toggles on each invoice. You can still change them per invoice below.</div>
+        </div>
+        <label class="checkboxline">
+          <input type="checkbox" name="default_accept_manual_ach" checked />
+          <span>Accept manual ACH / bank transfer by default</span>
+        </label>
+        <label class="checkboxline">
+          <input type="checkbox" name="default_accept_stripe_card" checked />
+          <span>Accept Stripe cards by default</span>
+        </label>
+        <label class="checkboxline">
+          <input type="checkbox" name="default_accept_stripe_ach" checked />
+          <span>Accept Stripe ACH debit by default</span>
+        </label>
+        <label class="checkboxline">
+          <input type="checkbox" name="default_accept_paypal" />
+          <span>Accept PayPal by default</span>
+        </label>
+        <label class="checkboxline">
+          <input type="checkbox" name="default_accept_venmo" />
+          <span>Accept Venmo by default</span>
         </label>
         <div class="full muted" id="smtpProviderHint">Choose a provider preset to auto-fill SMTP host, port, and username.</div>
         <div class="full form-actions">
@@ -258,6 +303,32 @@
         </label>
         <label class="full">Terms
           <textarea name="terms" rows="3"></textarea>
+        </label>
+        <div class="full">
+          <div class="panel-row">
+            <b>Payment options</b>
+            <div class="muted" id="documentPaymentSyncMeta">Desktop-only until you publish this invoice to the hosted payment service.</div>
+          </div>
+        </div>
+        <label class="checkboxline">
+          <input type="checkbox" name="accept_manual_ach" checked />
+          <span>Manual ACH / bank transfer</span>
+        </label>
+        <label class="checkboxline">
+          <input type="checkbox" name="accept_stripe_card" checked />
+          <span>Stripe cards</span>
+        </label>
+        <label class="checkboxline">
+          <input type="checkbox" name="accept_stripe_ach" checked />
+          <span>Stripe ACH debit</span>
+        </label>
+        <label class="checkboxline">
+          <input type="checkbox" name="accept_paypal" />
+          <span>PayPal</span>
+        </label>
+        <label class="checkboxline">
+          <input type="checkbox" name="accept_venmo" />
+          <span>Venmo</span>
         </label>
         <div class="full">
           <div class="panel-row">
