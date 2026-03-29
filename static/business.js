@@ -114,6 +114,21 @@ function formToObject(form) {
 
 function renderSettings() {
   setFormValues($("#settingsForm"), state.settings);
+  const receiptPortalBtn = $("#receiptPortalBtn");
+  if (receiptPortalBtn) {
+    const base = String(state.settings.invoice_payment_url_base || "").trim();
+    let receiptUrl = "https://project-rzdrv.vercel.app/receipts/upload";
+    if (base) {
+      if (base.endsWith("/invoice")) receiptUrl = `${base}/../receipts/upload`;
+      else if (base.endsWith("/invoice/")) receiptUrl = `${base}../receipts/upload`;
+      else receiptUrl = `${base.replace(/\/+$/, "")}/receipts/upload`;
+    }
+    try {
+      receiptPortalBtn.href = new URL(receiptUrl, window.location.origin).toString();
+    } catch (err) {
+      receiptPortalBtn.href = "https://project-rzdrv.vercel.app/receipts/upload";
+    }
+  }
   updateSmtpProviderHint();
 }
 
@@ -359,7 +374,14 @@ async function loadAll() {
     try {
       const sync = await apiJson("/api/hosted_payments/sync", "POST", {});
       if (sync.updated) {
-        syncSummary = ` Synced ${sync.updated} hosted invoice${sync.updated === 1 ? "" : "s"}.`;
+        const paidInvoices = (sync.updated_documents || []).filter((doc) => doc.to_status === "paid");
+        if (paidInvoices.length) {
+          const labels = paidInvoices.map((doc) => doc.number || `#${doc.id}`).slice(0, 3);
+          const extra = paidInvoices.length > 3 ? ` and ${paidInvoices.length - 3} more` : "";
+          syncSummary = `${paidInvoices.length === 1 ? "Marked" : "Marked"} ${labels.join(", ")} ${paidInvoices.length === 1 ? "paid" : "paid"}${extra}.`;
+        } else {
+          syncSummary = `Synced ${sync.updated} hosted invoice${sync.updated === 1 ? "" : "s"}.`;
+        }
       }
     } catch (err) {
       console.warn("Hosted payment sync failed", err);

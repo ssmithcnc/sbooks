@@ -283,6 +283,84 @@ a {
   color: var(--ink-soft);
 }
 
+.shell.shell-narrow {
+  width: min(920px, calc(100vw - 24px));
+}
+
+.receipt-grid {
+  align-items: start;
+}
+
+.receipt-title {
+  margin-top: 8px;
+  font-size: clamp(1.8rem, 4vw, 2.5rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.receipt-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px 16px;
+  font: inherit;
+  color: var(--ink);
+  background: #fff;
+}
+
+.field input[type="file"] {
+  padding: 12px 14px;
+  background: var(--surface-muted);
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.notice {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  font-weight: 700;
+}
+
+.notice.good {
+  background: rgba(14, 141, 99, 0.1);
+  color: var(--success);
+}
+
+.notice.bad {
+  background: rgba(180, 35, 24, 0.1);
+  color: #b42318;
+}
+
+.notice-detail {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 @media (max-width: 820px) {
   .shell {
     width: min(100vw - 20px, 680px);
@@ -295,6 +373,10 @@ a {
   }
 
   .grid.two {
+    grid-template-columns: 1fr;
+  }
+
+  .field-row {
     grid-template-columns: 1fr;
   }
 

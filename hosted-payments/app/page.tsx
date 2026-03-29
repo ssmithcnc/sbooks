@@ -30,6 +30,9 @@ export default function HomePage() {
             <Link className="btn primary" href="/invoice/demo-invoice">
               Open demo invoice page
             </Link>
+            <Link className="btn secondary" href="/receipts/upload">
+              Open receipt upload
+            </Link>
           </div>
         </article>
 
@@ -41,6 +44,7 @@ export default function HomePage() {
             <div>3. Add Stripe secret and webhook secret.</div>
             <div>4. Add PayPal client, secret, and webhook id.</div>
             <div>5. Apply <code>supabase/schema.sql</code> in Supabase.</div>
+            <div>6. Open <code>/receipts/upload</code> from a phone to start building the receipt bucket.</div>
           </div>
         </aside>
       </section>

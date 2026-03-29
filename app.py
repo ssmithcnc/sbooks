@@ -1490,7 +1490,7 @@ def publish_invoice_to_hosted_payments(conn, document: dict, settings: dict) -> 
 
 def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] | None = None) -> dict:
   if not supabase_is_configured(settings):
-    return {"updated": 0, "checked": 0}
+    return {"updated": 0, "checked": 0, "updated_documents": []}
 
   query = """SELECT id, number, status, cloud_public_id, payment_url
              FROM documents
@@ -1503,11 +1503,11 @@ def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] |
 
   rows = conn.execute(query, params).fetchall()
   if not rows:
-    return {"updated": 0, "checked": 0}
+    return {"updated": 0, "checked": 0, "updated_documents": []}
 
   public_ids = [clean_text(row["cloud_public_id"]) for row in rows if clean_text(row["cloud_public_id"])]
   if not public_ids:
-    return {"updated": 0, "checked": 0}
+    return {"updated": 0, "checked": 0, "updated_documents": []}
 
   remote_rows = supabase_rest_request(
     settings,
@@ -1525,6 +1525,7 @@ def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] |
 
   updated = 0
   checked = 0
+  updated_documents = []
   available = document_table_columns(conn)
   for row in rows:
     public_id = clean_text(row["cloud_public_id"])
@@ -1542,8 +1543,10 @@ def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] |
       updates["cloud_sync_status"] = desired_sync_status
     if "cloud_synced_at" in available:
       updates["cloud_synced_at"] = now_iso()
+    remote_status = local_status
     if remote_payment_status == "paid" and local_status != "paid":
       updates["status"] = "paid"
+      remote_status = "paid"
     if not updates:
       continue
     updates["updated_at"] = now_iso()
@@ -1553,8 +1556,16 @@ def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] |
       tuple(updates.values()) + (row["id"],)
     )
     updated += 1
+    updated_documents.append({
+      "id": row["id"],
+      "number": clean_text(row["number"]),
+      "public_id": public_id,
+      "from_status": local_status,
+      "to_status": remote_status,
+      "payment_url": clean_text(remote.get("payment_page_url")) or clean_text(row["payment_url"]),
+    })
 
-  return {"updated": updated, "checked": checked}
+  return {"updated": updated, "checked": checked, "updated_documents": updated_documents}
 
 
 def build_payment_url(document: dict, settings: dict) -> str:
