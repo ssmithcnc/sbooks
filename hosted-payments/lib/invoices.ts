@@ -21,6 +21,14 @@ type InvoiceRecord = {
   };
 };
 
+type PaymentOptionsRecord = {
+  accept_manual_ach: boolean;
+  accept_stripe_card: boolean;
+  accept_stripe_ach: boolean;
+  accept_paypal: boolean;
+  accept_venmo: boolean;
+};
+
 export async function getInvoiceByPublicId(publicId: string) {
   const supabase = getSupabaseAdmin();
 
@@ -28,6 +36,7 @@ export async function getInvoiceByPublicId(publicId: string) {
     .from("invoices")
     .select("id, public_id, invoice_number, customer_name, customer_email, issue_date, due_date, currency, total")
     .eq("public_id", publicId)
+    .returns<InvoiceRecord | null>()
     .maybeSingle();
 
   if (invoiceError) {
@@ -62,6 +71,7 @@ export async function getInvoiceByPublicId(publicId: string) {
     .from("invoice_payment_options")
     .select("accept_manual_ach, accept_stripe_card, accept_stripe_ach, accept_paypal, accept_venmo")
     .eq("invoice_id", invoice.id)
+    .returns<PaymentOptionsRecord | null>()
     .maybeSingle();
 
   if (optionsError && optionsError.code !== "PGRST116") {
@@ -75,7 +85,7 @@ export async function getInvoiceByPublicId(publicId: string) {
     .maybeSingle();
 
   return {
-    ...(invoice as InvoiceRecord),
+    ...invoice,
     manual_bank_instructions: businessProfile?.manual_bank_instructions || null,
     business: {
       company_name: businessProfile?.company_name || "S-Books",
