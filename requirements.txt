@@ -1,0 +1,6 @@
+flask==3.0.2
+
+gspread
+google-auth
+openpyxl
+reportlab

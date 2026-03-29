@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>{{ document.number }}</title>
+  <style>
+    :root {
+      --ink: #142132;
+      --muted: #5e6b7a;
+      --line: #d7dee6;
+      --soft: #f3f6f8;
+      --brand: #315ca8;
+      --brand-soft: #eef4fb;
+      --strong: #0b1725;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+    }
+    .page {
+      padding: 34px 40px 40px;
+    }
+    .hero {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+    .brand-card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 28px 28px 22px;
+      background: #fff;
+    }
+    .eyebrow {
+      font-size: 12px;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .company-name {
+      font-size: 30px;
+      line-height: 1.02;
+      font-weight: 700;
+      margin: 0 0 18px 0;
+      max-width: 100%;
+      color: var(--strong);
+    }
+    .company-lines {
+      white-space: pre-line;
+      font-size: 14px;
+      line-height: 1.5;
+      max-width: 100%;
+      color: var(--muted);
+    }
+    .brand-top {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+      margin-bottom: 8px;
+      text-align: left;
+    }
+    .brand-logo {
+      max-width: 400px;
+      max-height: 88px;
+      object-fit: contain;
+      padding: 0;
+      flex: 0 0 auto;
+      display: block;
+    }
+    .brand-mark {
+      display: flex;
+      align-items: flex-start;
+      gap: 2px;
+      flex: 0 0 auto;
+    }
+    .brand-site {
+      color: var(--brand);
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1;
+      margin-top: 44px;
+      text-decoration: none;
+    }
+    .brand-copy {
+      min-width: 0;
+    }
+    .brand-copy .company-name {
+      margin: 0 0 6px 0;
+      font-size: 16px;
+      line-height: 1.5;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .summary-card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 24px 24px 22px;
+      background: var(--brand-soft);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .summary-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+    .doc-title {
+      font-size: 30px;
+      font-weight: 700;
+      color: var(--strong);
+      margin: 0;
+    }
+    .doc-number {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 4px;
+    }
+    .amount-box {
+      background: var(--brand-soft);
+      border: 1px solid #d4e2f3;
+      border-radius: 18px;
+      padding: 16px 18px;
+      text-align: right;
+      margin-bottom: 18px;
+      background: #fff;
+    }
+    .amount-box .label {
+      display: block;
+      color: var(--muted);
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: .16em;
+      margin-bottom: 8px;
+    }
+    .amount-box .value {
+      font-size: 30px;
+      font-weight: 700;
+      color: var(--brand);
+    }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 18px;
+    }
+    .meta-item {
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+    .meta-item .k {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .16em;
+      margin-bottom: 4px;
+    }
+    .meta-item .v {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--strong);
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px 18px 16px;
+      background: #fff;
+    }
+    .card-title {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .16em;
+      margin-bottom: 12px;
+      font-weight: 700;
+    }
+    .stack {
+      white-space: pre-line;
+      line-height: 1.55;
+      font-size: 14px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+    }
+    thead {
+      background: var(--soft);
+    }
+    th, td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+    th {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    tbody tr:nth-child(even) {
+      background: #fcfdfe;
+    }
+    th.num, td.num { text-align: right; white-space: nowrap; }
+    .desc-main {
+      font-weight: 600;
+      color: var(--strong);
+    }
+    .totals-wrap {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 24px;
+      margin-top: 22px;
+      align-items: start;
+    }
+    .notes-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .totals {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px 18px;
+      background: #fff;
+    }
+    .totals div {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      font-size: 14px;
+    }
+    .totals .total {
+      border-top: 1px solid var(--line);
+      margin-top: 6px;
+      padding-top: 14px;
+      font-weight: 700;
+      font-size: 22px;
+      color: var(--strong);
+    }
+    @media print {
+      .page { padding: 24px; }
+    }
+    @media (max-width: 760px) {
+      .detail-grid, .totals-wrap {
+        grid-template-columns: 1fr;
+      }
+      .brand-top {
+        align-items: flex-start;
+      }
+      .brand-logo {
+        max-width: 280px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <div class="brand-card">
+        <div class="brand-top">
+          <div class="brand-copy">
+            <div class="brand-mark">
+              {% if business.company_logo_path %}
+              <a href="{{ business.company_website or 'https://cncpowder.com' }}" target="_blank" rel="noopener" aria-label="{{ business.company_name }} website">
+                <img class="brand-logo" src="{{ logo_src or '/api/business_logo' }}" alt="{{ business.company_name }} logo" />
+              </a>
+              {% endif %}
+              <a class="brand-site" href="{{ business.company_website or 'https://cncpowder.com' }}" target="_blank" rel="noopener">.com</a>
+            </div>
+            <h1 class="company-name">{{ business.company_name }}</h1>
+          </div>
+        </div>
+        <div class="company-lines">{% if business.company_address %}{{ business.company_address }}{% endif %}{% if business.company_phone %}{{ "\n" + business.company_phone }}{% endif %}{% if business.company_email %}{{ "\n" + business.company_email }}{% endif %}</div>
+      </div>
+      <div class="summary-card">
+        <div>
+          <div class="summary-head">
+            <div>
+              <h2 class="doc-title">{{ document.type|title }}</h2>
+              <div class="doc-number">{{ document.number }}</div>
+            </div>
+          </div>
+          <div class="amount-box">
+            <span class="label">Amount Due</span>
+            <span class="value">${{ "%.2f"|format(document.total) }}</span>
+          </div>
+        </div>
+        <div class="meta-grid">
+          <div class="meta-item">
+            <div class="k">Issue Date</div>
+            <div class="v">{{ document.issue_date }}</div>
+          </div>
+          <div class="meta-item">
+            <div class="k">Due Date</div>
+            <div class="v">{{ document.due_date or "On receipt" }}</div>
+          </div>
+          <div class="meta-item">
+            <div class="k">Status</div>
+            <div class="v">{{ document.status|title }}</div>
+          </div>
+          <div class="meta-item">
+            <div class="k">Tax Rate</div>
+            <div class="v">{{ "%.2f"|format(document.tax_rate) }}%</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="detail-grid">
+      <div class="card">
+        <div class="card-title">Bill To</div>
+        <div class="stack">{{ document.customer.name }}{% if document.customer.contact_name %}{{ "\n" + document.customer.contact_name }}{% endif %}{% if document.customer.email %}{{ "\n" + document.customer.email }}{% endif %}{% if document.customer.phone %}{{ "\n" + document.customer.phone }}{% endif %}{% if document.customer.billing_address %}{{ "\n" + document.customer.billing_address }}{% endif %}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Document Summary</div>
+        <div class="stack">{{ document.type|title }} {{ document.number }}{% if document.converted_from_document_id %}{{ "\nConverted from estimate #" ~ document.converted_from_document_id }}{% endif %}{% if document.terms %}{{ "\n\nTerms: " ~ document.terms }}{% endif %}</div>
+      </div>
+    </section>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th class="num">Qty</th>
+          <th class="num">Rate</th>
+          <th class="num">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in document.lines %}
+        <tr>
+          <td>
+            <div class="desc-main">{{ line.description }}</div>
+            {% if line.product_name %}<div style="color:var(--muted);margin-top:4px;">{{ line.product_name }}</div>{% endif %}
+          </td>
+          <td class="num">{{ "%.2f"|format(line.quantity)|replace(".00", "") }}</td>
+          <td class="num">${{ "%.2f"|format(line.unit_price) }}</td>
+          <td class="num">${{ "%.2f"|format(line.line_total) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <section class="totals-wrap">
+      <div class="notes-stack">
+        {% if document.notes %}
+        <div class="card">
+          <div class="card-title">Notes</div>
+          <div class="stack">{{ document.notes }}</div>
+        </div>
+        {% endif %}
+        {% if document.terms %}
+        <div class="card">
+          <div class="card-title">Terms</div>
+          <div class="stack">{{ document.terms }}</div>
+        </div>
+        {% endif %}
+      </div>
+      <div class="totals">
+        <div><span>Subtotal</span><span>${{ "%.2f"|format(document.subtotal) }}</span></div>
+        <div><span>Tax ({{ "%.2f"|format(document.tax_rate) }}%)</span><span>${{ "%.2f"|format(document.tax_amount) }}</span></div>
+        <div class="total"><span>Total</span><span>${{ "%.2f"|format(document.total) }}</span></div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+  <link rel="icon" type="image/png" href="/static/sbooks-brand-badge.png"/>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img class="product-seal" src="/static/sbooks-brand-badge.png" alt="S-Books"/>
+      <div>
+        <div class="title">S-Books</div>
+        <div class="subtitle">Cashflow planner and business books in one local app</div>
+      </div>
+    </div>
+    <div class="topbar-center">
+      <label class="month-jump-wrap" for="monthJump">
+        <span class="month-jump-label">Jump to month</span>
+        <input type="month" id="monthJump" class="month-jump" aria-label="Jump to month" />
+      </label>
+    </div>
+    <div class="actions">
+      <a class="btn" href="/business">Business Books</a>
+      <button class="btn" id="btnRefresh">Refresh</button>
+      <button class="btn" id="btnSetup">Setup / Paychecks</button>
+      <button class="btn" id="btnAddTx">Add Transaction</button>
+      <button class="btn" id="btnAddRule">Add Recurring Rule
+        <button id='exportSheetsBtn'>Export Sheets</button></button>
+      <button class="btn" id="btnCC">CC Snapshots</button>
+      <button class="btn" id="btnArchives">Archives</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="panel" id="statusPanel">
+      <div class="panel-row">
+        <div><b>Rule:</b> Due day <b>1–15</b> = “1st-of-month” bills. Due day <b>16–EOM</b> = “mid-month” bills.</div>
+        <div class="muted">Funding: 1–15 funded by <b>previous month’s last paycheck</b>; 16–EOM funded by <b>current month’s first paycheck</b>.</div>
+      </div>
+      <div id="statusText" class="muted"></div>
+    </section>
+
+    <section class="timeline">
+      <div class="timeline-header">
+        <h2>Cashflow Planner</h2>
+        <div class="muted" id="timelineMeta"></div>
+      </div>
+      <div class="periods" id="periods"></div>
+    </section>
+  </main>
+
+  <div class="modal-backdrop hidden" id="modalBackdrop" onclick="if(event.target && event.target.id==='modalBackdrop'){document.getElementById('modalBackdrop').classList.add('hidden')}">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="modalTitle">Modal</div>
+        <button class="btn btn-secondary" id="modalClose" type="button" onclick="document.getElementById('modalBackdrop').classList.add('hidden')">Close</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer" id="modalFooter"></div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+
+<!-- Calculator Widget -->
+<div id="calcWidget" class="calc-widget">
+  <div id="calcHeader" class="calc-header">
+    Calculator
+    <button id="calcMinBtn">_</button>
+  </div>
+  <div class="calc-body">
+    <input id="calcDisplay" type="text" readonly />
+    <div class="calc-buttons">
+      <button>7</button><button>8</button><button>9</button><button>/</button>
+      <button>4</button><button>5</button><button>6</button><button>*</button>
+      <button>1</button><button>2</button><button>3</button><button>-</button>
+      <button>0</button><button>.</button><button>=</button><button>+</button>
+      <button id="calcClear">C</button>
+    </div>
+  </div>
+</div>
+<button id="calcToggle" class="calc-toggle">Calc</button>
+
+</body>
+</html>
