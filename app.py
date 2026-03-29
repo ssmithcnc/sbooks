@@ -4,6 +4,7 @@ import csv
 import io
 import base64
 import html
+import json
 import mimetypes
 import os
 import re
@@ -18,7 +19,9 @@ from email.message import EmailMessage
 from email.utils import formataddr
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import quote
+from urllib import error as urlerror
+from urllib import request as urlrequest
+from urllib.parse import quote, urlencode
 
 from flask import Flask, jsonify, request, render_template, send_file, send_from_directory
 
@@ -123,6 +126,11 @@ def pick_value(row: dict, *keys, default=None):
 
 def clean_text(value, default: str = "") -> str:
   return str(value or default).strip()
+
+
+def slugify(value: str, default: str = "sbooks") -> str:
+  slug = re.sub(r"[^a-z0-9]+", "-", clean_text(value).lower()).strip("-")
+  return slug or default
 
 
 def looks_like_report_footer(value: str) -> bool:
@@ -1255,12 +1263,242 @@ def app_base_url() -> str:
   return request.url_root.rstrip("/")
 
 
+def supabase_is_configured(settings: dict) -> bool:
+  return bool(clean_text(settings.get("supabase_url")) and clean_text(settings.get("supabase_secret_key")))
+
+
+def hosted_payment_base_url(settings: dict) -> str:
+  return clean_text(settings.get("invoice_payment_url_base"))
+
+
+def hosted_payments_are_configured(settings: dict) -> bool:
+  return bool(supabase_is_configured(settings) and hosted_payment_base_url(settings))
+
+
+def hosted_payment_page_url(public_id: str, document: dict, settings: dict) -> str | None:
+  base = hosted_payment_base_url(settings)
+  if not base:
+    return None
+  replacements = {
+    "{public_id}": quote(str(public_id)),
+    "{id}": quote(str(document["id"])),
+    "{number}": quote(str(document["number"])),
+  }
+  url = base
+  for needle, replacement in replacements.items():
+    if needle in url:
+      url = url.replace(needle, replacement)
+  if url != base:
+    return url
+  return f"{base.rstrip('/')}/{quote(str(public_id))}"
+
+
+def first_record(payload):
+  if isinstance(payload, list):
+    return payload[0] if payload else None
+  return payload
+
+
+def format_supabase_error(exc: Exception) -> str:
+  if isinstance(exc, urlerror.HTTPError):
+    try:
+      payload = exc.read().decode("utf-8", errors="replace")
+      data = json.loads(payload)
+      return data.get("message") or data.get("error_description") or data.get("hint") or payload or str(exc)
+    except Exception:
+      return str(exc)
+  return str(exc)
+
+
+def supabase_rest_request(
+  settings: dict,
+  table: str,
+  *,
+  method: str = "GET",
+  query: dict | None = None,
+  payload: dict | list | None = None,
+  prefer: list[str] | None = None,
+):
+  supabase_url = clean_text(settings.get("supabase_url")).rstrip("/")
+  secret = clean_text(settings.get("supabase_secret_key"))
+  if not supabase_url or not secret:
+    raise ValueError("Supabase URL and secret key are required before publishing hosted payments.")
+
+  endpoint = f"{supabase_url}/rest/v1/{table}"
+  if query:
+    endpoint = f"{endpoint}?{urlencode(query, doseq=True)}"
+
+  headers = {
+    "apikey": secret,
+    "Authorization": f"Bearer {secret}",
+    "Accept": "application/json",
+  }
+  if prefer:
+    headers["Prefer"] = ", ".join(prefer)
+
+  data = None
+  if payload is not None:
+    headers["Content-Type"] = "application/json"
+    data = json.dumps(payload).encode("utf-8")
+
+  req = urlrequest.Request(endpoint, data=data, method=method.upper(), headers=headers)
+  try:
+    with urlrequest.urlopen(req, timeout=20) as resp:
+      raw = resp.read().decode("utf-8", errors="replace").strip()
+      if not raw:
+        return None
+      try:
+        return json.loads(raw)
+      except Exception:
+        return raw
+  except urlerror.HTTPError as exc:
+    raise RuntimeError(format_supabase_error(exc)) from exc
+  except urlerror.URLError as exc:
+    raise RuntimeError(f"Could not reach Supabase: {exc.reason}") from exc
+
+
+def persist_document_payment_link(conn, document_id: int, payment_url: str | None = None, public_id: str | None = None, sync_status: str | None = None, synced_at: str | None = None):
+  available = document_table_columns(conn)
+  updates = {}
+  if "payment_url" in available and payment_url is not None:
+    updates["payment_url"] = payment_url
+  if "cloud_public_id" in available and public_id is not None:
+    updates["cloud_public_id"] = public_id
+  if "cloud_sync_status" in available and sync_status is not None:
+    updates["cloud_sync_status"] = sync_status
+  if "cloud_synced_at" in available and synced_at is not None:
+    updates["cloud_synced_at"] = synced_at
+  if not updates:
+    return
+  updates["updated_at"] = now_iso()
+  assignments = ", ".join(f"{column}=?" for column in updates.keys())
+  conn.execute(
+    f"UPDATE documents SET {assignments} WHERE id=?",
+    tuple(updates.values()) + (document_id,)
+  )
+
+
+def publish_invoice_to_hosted_payments(conn, document: dict, settings: dict) -> dict:
+  if document["type"] != "invoice":
+    raise ValueError("Only invoices can be published to hosted payments.")
+  if not hosted_payments_are_configured(settings):
+    raise ValueError("Hosted payments require the payment page base URL plus Supabase URL and secret key.")
+
+  company_name = clean_text(settings.get("company_name")) or APP_TITLE
+  business_slug = slugify(company_name)
+  business_payload = {
+    "slug": business_slug,
+    "company_name": company_name,
+    "company_email": clean_text(settings.get("company_email")) or None,
+    "company_phone": clean_text(settings.get("company_phone")) or None,
+    "company_website": clean_text(settings.get("company_website")) or None,
+    "manual_bank_instructions": clean_text(settings.get("manual_bank_instructions")) or None,
+    "stripe_publishable_key": clean_text(settings.get("stripe_publishable_key")) or None,
+    "updated_at": now_iso(),
+  }
+  business_response = supabase_rest_request(
+    settings,
+    "business_profiles",
+    method="POST",
+    query={"on_conflict": "slug", "select": "id,slug"},
+    payload=business_payload,
+    prefer=["resolution=merge-duplicates", "return=representation"],
+  )
+  business_record = first_record(business_response)
+  if not business_record or not business_record.get("id"):
+    raise RuntimeError("Supabase did not return a business profile id.")
+
+  public_id = clean_text(document.get("cloud_public_id")) or uuid.uuid4().hex
+  payment_page_url = hosted_payment_page_url(public_id, document, settings)
+  invoice_payload = {
+    "business_profile_id": business_record["id"],
+    "local_invoice_id": document["id"],
+    "public_id": public_id,
+    "invoice_number": document["number"],
+    "customer_name": document["customer"]["name"],
+    "customer_email": document["customer"].get("email"),
+    "issue_date": document["issue_date"],
+    "due_date": document.get("due_date"),
+    "currency": "USD",
+    "subtotal": round(float(document.get("subtotal") or 0), 2),
+    "tax_amount": round(float(document.get("tax_amount") or 0), 2),
+    "total": round(float(document.get("total") or 0), 2),
+    "amount_paid": round(float(document.get("total") or 0), 2) if document.get("status") == "paid" else 0,
+    "status": "paid" if document.get("status") == "paid" else "open",
+    "payment_status": "paid" if document.get("status") == "paid" else "unpaid",
+    "payment_page_url": payment_page_url,
+    "metadata": {
+      "source": "sbooks-desktop",
+      "local_document_id": document["id"],
+      "terms": document.get("terms") or "",
+      "notes": document.get("notes") or "",
+      "payment_url": payment_page_url,
+    },
+    "updated_at": now_iso(),
+  }
+  invoice_response = supabase_rest_request(
+    settings,
+    "invoices",
+    method="POST",
+    query={"on_conflict": "public_id", "select": "id,public_id,payment_page_url"},
+    payload=invoice_payload,
+    prefer=["resolution=merge-duplicates", "return=representation"],
+  )
+  invoice_record = first_record(invoice_response)
+  if not invoice_record or not invoice_record.get("id"):
+    raise RuntimeError("Supabase did not return an invoice id.")
+
+  payment_options_payload = {
+    "invoice_id": invoice_record["id"],
+    "accept_manual_ach": bool(document.get("accept_manual_ach")),
+    "accept_stripe_card": bool(document.get("accept_stripe_card")),
+    "accept_stripe_ach": bool(document.get("accept_stripe_ach")),
+    "accept_paypal": bool(document.get("accept_paypal")),
+    "accept_venmo": bool(document.get("accept_venmo")),
+    "updated_at": now_iso(),
+  }
+  supabase_rest_request(
+    settings,
+    "invoice_payment_options",
+    method="POST",
+    query={"on_conflict": "invoice_id", "select": "invoice_id"},
+    payload=payment_options_payload,
+    prefer=["resolution=merge-duplicates", "return=representation"],
+  )
+
+  synced_at = now_iso()
+  persist_document_payment_link(
+    conn,
+    document["id"],
+    payment_url=payment_page_url,
+    public_id=public_id,
+    sync_status="synced",
+    synced_at=synced_at,
+  )
+  document["cloud_public_id"] = public_id
+  document["cloud_sync_status"] = "synced"
+  document["cloud_synced_at"] = synced_at
+  document["payment_url"] = payment_page_url
+  return {
+    "public_id": public_id,
+    "payment_url": payment_page_url,
+    "invoice_id": invoice_record["id"],
+    "business_slug": business_slug,
+    "synced_at": synced_at,
+  }
+
+
 def build_payment_url(document: dict, settings: dict) -> str:
-  base = clean_text(settings.get("invoice_payment_url_base"))
+  base = hosted_payment_base_url(settings)
+  public_id = clean_text(document.get("cloud_public_id"))
   if base:
+    if public_id:
+      hosted_url = hosted_payment_page_url(public_id, document, settings)
+      if hosted_url:
+        return hosted_url
     if "{id}" in base or "{number}" in base:
       return base.replace("{id}", str(document["id"])).replace("{number}", quote(str(document["number"])))
-    return f"{base.rstrip('/')}/{document['id']}"
+    return f"{app_base_url()}/pay/{document['id']}"
   return f"{app_base_url()}/pay/{document['id']}"
 
 
@@ -1886,9 +2124,37 @@ def get_document_email_draft(document_id: int):
     if document["type"] != "invoice":
       return json_error("Only invoices can be sent by email", 400)
     settings = business_settings_dict(conn)
+    if hosted_payments_are_configured(settings):
+      try:
+        publish_invoice_to_hosted_payments(conn, document, settings)
+      except Exception:
+        if not document.get("cloud_public_id"):
+          document["cloud_sync_status"] = "sync_failed"
     ensure_document_payment_url(conn, document, settings, persist=False)
     draft = build_invoice_email_draft(document, settings)
   return jsonify({"ok": True, "draft": draft, "document": document})
+
+
+@app.post("/api/documents/<int:document_id>/publish_payment")
+def publish_document_payment(document_id: int):
+  try:
+    with db() as conn:
+      document = fetch_document(conn, document_id)
+      if not document:
+        return json_error("Document not found", 404)
+      if document["type"] != "invoice":
+        return json_error("Only invoices can be published to hosted payments", 400)
+      settings = business_settings_dict(conn)
+      sync = publish_invoice_to_hosted_payments(conn, document, settings)
+    return jsonify({
+      "ok": True,
+      "document": document,
+      "payment_url": sync["payment_url"],
+      "public_id": sync["public_id"],
+      "message": f"Hosted payment page published for {document['number']}.",
+    })
+  except Exception as exc:
+    return json_error(str(exc))
 
 
 @app.post("/api/documents/<int:document_id>/send_email")
@@ -1902,6 +2168,12 @@ def send_document_email(document_id: int):
       if document["type"] != "invoice":
         return json_error("Only invoices can be sent by email", 400)
       settings = business_settings_dict(conn)
+      if hosted_payments_are_configured(settings):
+        try:
+          publish_invoice_to_hosted_payments(conn, document, settings)
+        except Exception:
+          if not document.get("cloud_public_id"):
+            document["cloud_sync_status"] = "sync_failed"
       ensure_document_payment_url(conn, document, settings, persist=False)
       draft = build_invoice_email_draft(document, settings)
       to_email = clean_text(payload.get("to") or draft["to"])

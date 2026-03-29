@@ -45,7 +45,7 @@
           <input type="text" name="company_website" placeholder="https://cncpowder.com" />
         </label>
         <label>Payment page base URL
-          <input type="text" name="invoice_payment_url_base" placeholder="Leave blank to use local /pay page" />
+          <input type="text" name="invoice_payment_url_base" placeholder="https://your-app.vercel.app/invoice or .../invoice/{public_id}" />
         </label>
         <label>Supabase project URL
           <input type="text" name="supabase_url" placeholder="https://your-project.supabase.co" />
@@ -339,6 +339,7 @@
         </div>
         <div class="full totals-strip" id="documentTotals"></div>
         <div class="full form-actions">
+          <button class="btn btn-secondary" type="button" id="publishDocumentBtn">Publish Hosted Payment</button>
           <button class="btn" type="submit">Save Document</button>
           <button class="btn btn-secondary" type="button" id="resetDocumentBtn">Clear</button>
         </div>

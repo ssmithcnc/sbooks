@@ -122,7 +122,8 @@ function documentPaymentSyncMeta(document) {
   if (!document.cloud_public_id) return "Desktop-only until you publish this invoice to the hosted payment service.";
   const status = document.cloud_sync_status || "synced";
   const syncedAt = document.cloud_synced_at ? ` on ${document.cloud_synced_at}` : "";
-  return `Hosted payment ID ${document.cloud_public_id} | sync status: ${status}${syncedAt}`;
+  const paymentUrl = document.payment_url ? ` | ${document.payment_url}` : "";
+  return `Hosted payment ID ${document.cloud_public_id} | sync status: ${status}${syncedAt}${paymentUrl}`;
 }
 
 function renderCustomers() {
@@ -188,6 +189,7 @@ function renderDocuments() {
       <td class="row-actions">
         <button class="btn btn-secondary" type="button" data-edit-document="${d.id}">Edit</button>
         ${d.type === "estimate" ? `<button class="btn btn-secondary" type="button" data-convert-document="${d.id}">Convert</button>` : ``}
+        ${d.type === "invoice" ? `<button class="btn btn-secondary" type="button" data-publish-document="${d.id}">${d.cloud_public_id ? "Republish Pay Link" : "Publish Pay Link"}</button>` : ``}
         ${d.type === "invoice" ? `<button class="btn btn-secondary" type="button" data-review-email="${d.id}">Review & Send</button>` : ``}
         <a class="btn btn-secondary" target="_blank" rel="noopener" href="/api/documents/${d.id}/print">Print</a>
         <a class="btn btn-secondary" href="/api/documents/${d.id}/pdf">PDF</a>
@@ -489,6 +491,24 @@ async function loadEmailDraft(id) {
   window.scrollTo({ top: $("#emailComposerPanel").offsetTop - 80, behavior: "smooth" });
 }
 
+async function publishDocumentPayment() {
+  const documentId = $("#documentForm [name='id']").value;
+  if (!documentId) {
+    alert("Load or save an invoice first.");
+    return;
+  }
+  const response = await apiJson(`/api/documents/${documentId}/publish_payment`, "POST", {});
+  await loadAll();
+  const fresh = await apiGet(`/api/documents/${documentId}`);
+  $("#documentPaymentSyncMeta").textContent = documentPaymentSyncMeta(fresh);
+  const paymentUrl = response.payment_url || fresh.payment_url;
+  const statusMessage = response.message || `Hosted payment page published for ${fresh.number}.`;
+  setStatus(paymentUrl ? `${statusMessage} ${paymentUrl}` : statusMessage);
+  if ($("#emailComposerForm [name='document_id']").value === String(documentId)) {
+    await loadEmailDraft(documentId);
+  }
+}
+
 async function refreshEmailDraft() {
   const documentId = $("#emailComposerForm [name='document_id']").value;
   if (!documentId) return;
@@ -523,6 +543,7 @@ function bindEvents() {
   $("#refreshBusinessBtn").addEventListener("click", () => loadAll().catch(showError));
   $("#refreshEmailDraftBtn").addEventListener("click", () => refreshEmailDraft().catch(showError));
   $("#sendInvoiceEmailBtn").addEventListener("click", () => sendInvoiceEmail().catch(showError));
+  $("#publishDocumentBtn").addEventListener("click", () => publishDocumentPayment().catch(showError));
   $("#smtpProviderSelect").addEventListener("change", (e) => {
     applySmtpPreset(e.target.value, true);
   });
@@ -609,6 +630,17 @@ function bindEvents() {
     if (docReview) {
       await loadEmailDraft(docReview.dataset.reviewEmail);
       setStatus("Invoice email draft loaded.");
+      return;
+    }
+    const docPublish = e.target.closest("[data-publish-document]");
+    if (docPublish) {
+      await apiJson(`/api/documents/${docPublish.dataset.publishDocument}/publish_payment`, "POST", {});
+      await loadAll();
+      if ($("#documentForm [name='id']").value === String(docPublish.dataset.publishDocument)) {
+        const fresh = await apiGet(`/api/documents/${docPublish.dataset.publishDocument}`);
+        $("#documentPaymentSyncMeta").textContent = documentPaymentSyncMeta(fresh);
+      }
+      setStatus("Hosted payment page published.");
       return;
     }
     const tab = e.target.closest("[data-doc-filter]");
