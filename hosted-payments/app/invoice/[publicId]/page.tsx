@@ -5,10 +5,12 @@ import { getInvoiceByPublicId } from "@/lib/invoices";
 
 type PageProps = {
   params: Promise<{ publicId: string }>;
+  searchParams?: Promise<{ paid?: string; canceled?: string; error?: string }>;
 };
 
-export default async function InvoicePage({ params }: PageProps) {
+export default async function InvoicePage({ params, searchParams }: PageProps) {
   const { publicId } = await params;
+  const resolvedSearch = searchParams ? await searchParams : {};
   const invoice = await getInvoiceByPublicId(publicId);
 
   if (!invoice) notFound();
@@ -20,6 +22,24 @@ export default async function InvoicePage({ params }: PageProps) {
 
   return (
     <main className="shell">
+      {resolvedSearch?.paid ? (
+        <section className="card" style={{ marginBottom: 18, borderColor: "#b8e0c6", background: "#f4fff7" }}>
+          <div className="eyebrow" style={{ color: "#157347" }}>Payment received</div>
+          <div className="details">Stripe sent this payment back as successful. S-Books will reflect the webhook update after Stripe posts it.</div>
+        </section>
+      ) : null}
+      {resolvedSearch?.canceled ? (
+        <section className="card" style={{ marginBottom: 18, borderColor: "#f1d19a", background: "#fffaf0" }}>
+          <div className="eyebrow" style={{ color: "#b26a00" }}>Checkout canceled</div>
+          <div className="details">No payment was submitted. You can try again whenever you are ready.</div>
+        </section>
+      ) : null}
+      {resolvedSearch?.error ? (
+        <section className="card" style={{ marginBottom: 18, borderColor: "#efb7b7", background: "#fff7f7" }}>
+          <div className="eyebrow" style={{ color: "#b42318" }}>Checkout error</div>
+          <div className="details">{resolvedSearch.error}</div>
+        </section>
+      ) : null}
       <section className="hero">
         <div className="brand-mark" aria-hidden="true">
           <div className="brand-mark-text">

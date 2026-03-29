@@ -8,9 +8,10 @@ function getValue(formData: FormData, key: string) {
 }
 
 export async function POST(request: NextRequest) {
+  let publicId = "";
   try {
     const formData = await request.formData();
-    const publicId = getValue(formData, "publicId");
+    publicId = getValue(formData, "publicId");
     const paymentMethod = getValue(formData, "paymentMethod") || "card";
 
     if (!publicId) {
@@ -62,6 +63,14 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Stripe checkout error.";
     console.error("create-checkout-session failed", error);
+    if (publicId) {
+      const baseUrl = process.env.NEXT_PUBLIC_APP_BASE_URL || "";
+      if (baseUrl) {
+        const errorUrl = new URL(`/invoice/${publicId}`, baseUrl);
+        errorUrl.searchParams.set("error", message);
+        return NextResponse.redirect(errorUrl, { status: 303 });
+      }
+    }
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
