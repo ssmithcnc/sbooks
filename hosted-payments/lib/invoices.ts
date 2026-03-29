@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import type { PayPalOrderResponse, PayPalWebhookEvent } from "@/lib/paypal";
 
 type InvoiceRecord = {
   id: string;
@@ -42,6 +43,36 @@ type PaymentEventInsert = {
   event_type: string;
   payload: Record<string, unknown>;
 };
+
+async function findInvoiceIdByPublicId(publicId: string | null) {
+  if (!publicId) return null;
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("invoices")
+    .select("id")
+    .eq("public_id", publicId)
+    .returns<{ id: string } | null>()
+    .maybeSingle();
+  const invoiceLookup = data as { id: string } | null;
+  return invoiceLookup?.id || null;
+}
+
+async function insertPaymentEvent(record: PaymentEventInsert) {
+  const supabase = getSupabaseAdmin();
+  await (supabase.from("payment_events") as any).insert(record);
+}
+
+async function markInvoicePaid(invoiceId: string, latestCheckoutUrl: string | null = null) {
+  const supabase = getSupabaseAdmin();
+  await (supabase.from("invoices") as any)
+    .update({
+      payment_status: "paid",
+      status: "paid",
+      latest_checkout_url: latestCheckoutUrl,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", invoiceId);
+}
 
 export async function getInvoiceByPublicId(publicId: string) {
   const supabase = getSupabaseAdmin();
@@ -121,22 +152,10 @@ export async function getInvoiceByPublicId(publicId: string) {
 }
 
 export async function recordStripeWebhookEvent(event: Stripe.Event) {
-  const supabase = getSupabaseAdmin();
-
   const session = event.data.object as Stripe.Checkout.Session;
   const publicId = session.metadata?.public_id || null;
 
-  let invoiceId: string | null = null;
-  if (publicId) {
-    const { data } = await supabase
-      .from("invoices")
-      .select("id")
-      .eq("public_id", publicId)
-      .returns<{ id: string } | null>()
-      .maybeSingle();
-    const invoiceLookup = data as { id: string } | null;
-    invoiceId = invoiceLookup?.id || null;
-  }
+  const invoiceId = await findInvoiceIdByPublicId(publicId);
 
   const paymentEvent: PaymentEventInsert = {
     invoice_id: invoiceId,
@@ -146,17 +165,44 @@ export async function recordStripeWebhookEvent(event: Stripe.Event) {
     payload: event as unknown as Record<string, unknown>
   };
 
-  await (supabase.from("payment_events") as any).insert(paymentEvent);
+  await insertPaymentEvent(paymentEvent);
 
   if (event.type === "checkout.session.completed" && invoiceId) {
-    await (supabase
-      .from("invoices") as any)
-      .update({
-        payment_status: "paid",
-        status: "paid",
-        latest_checkout_url: session.url || null,
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", invoiceId);
+    await markInvoicePaid(invoiceId, session.url || null);
+  }
+}
+
+export async function recordPayPalOrderCapture(publicId: string, order: PayPalOrderResponse) {
+  const invoiceId = await findInvoiceIdByPublicId(publicId);
+
+  await insertPaymentEvent({
+    invoice_id: invoiceId,
+    provider: "paypal",
+    provider_event_id: order.id,
+    event_type: "PAYPAL.ORDER.CAPTURED",
+    payload: order as unknown as Record<string, unknown>
+  });
+
+  if (invoiceId) {
+    await markInvoicePaid(invoiceId);
+  }
+}
+
+export async function recordPayPalWebhookEvent(event: PayPalWebhookEvent) {
+  const publicId =
+    event.resource?.custom_id ||
+    null;
+  const invoiceId = await findInvoiceIdByPublicId(publicId);
+
+  await insertPaymentEvent({
+    invoice_id: invoiceId,
+    provider: "paypal",
+    provider_event_id: event.id,
+    event_type: event.event_type,
+    payload: event as unknown as Record<string, unknown>
+  });
+
+  if (event.event_type === "PAYMENT.CAPTURE.COMPLETED" && invoiceId) {
+    await markInvoicePaid(invoiceId);
   }
 }

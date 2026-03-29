@@ -25,7 +25,11 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
       {resolvedSearch?.paid ? (
         <section className="card" style={{ marginBottom: 18, borderColor: "#b8e0c6", background: "#f4fff7" }}>
           <div className="eyebrow" style={{ color: "#157347" }}>Payment received</div>
-          <div className="details">Stripe sent this payment back as successful. S-Books will reflect the webhook update after Stripe posts it.</div>
+          <div className="details">
+            {resolvedSearch?.provider === "paypal"
+              ? "PayPal returned this payment as successful. S-Books will reflect the webhook update after PayPal posts it."
+              : "Stripe sent this payment back as successful. S-Books will reflect the webhook update after Stripe posts it."}
+          </div>
         </section>
       ) : null}
       {resolvedSearch?.canceled ? (
@@ -86,6 +90,18 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
                 <button className="btn secondary" type="submit">Pay by ACH</button>
               </form>
             ) : null}
+            {(invoice.payment_options.accept_paypal || invoice.payment_options.accept_venmo) ? (
+              <form action="/api/paypal/create-order" method="post">
+                <input type="hidden" name="publicId" value={publicId} />
+                <button className="btn paypal" type="submit">
+                  {invoice.payment_options.accept_paypal && invoice.payment_options.accept_venmo
+                    ? "Pay with PayPal / Venmo"
+                    : invoice.payment_options.accept_venmo
+                      ? "Pay with Venmo"
+                      : "Pay with PayPal"}
+                </button>
+              </form>
+            ) : null}
           </div>
         </article>
 
@@ -117,6 +133,13 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
               </div>
               <div>{invoice.payment_options.accept_stripe_ach ? <span className="pill">Enabled</span> : null}</div>
             </div>
+            <div className="option">
+              <div>
+                <div className="option-label">PayPal / Venmo</div>
+                <div className="option-copy">PayPal Checkout with Venmo support for eligible US buyers.</div>
+              </div>
+              <div>{(invoice.payment_options.accept_paypal || invoice.payment_options.accept_venmo) ? <span className="pill">Enabled</span> : null}</div>
+            </div>
           </div>
 
           {invoice.payment_options.accept_manual_ach && invoice.manual_bank_instructions ? (
@@ -134,10 +157,9 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
       </section>
 
       <section className="card" style={{ marginTop: 18 }}>
-        <div className="eyebrow">Temporary scaffold</div>
+        <div className="eyebrow">Hosted checkout</div>
         <div className="details">
-          This page is wired to Supabase and Stripe helpers, but it still needs live project keys,
-          webhook setup, and desktop invoice sync before payments can go fully live.
+          This invoice page can route customers through Stripe cards, Stripe ACH, and PayPal / Venmo depending on the options enabled for the invoice.
         </div>
         <div className="cta-row">
           <Link className="btn secondary" href="/">Back to overview</Link>

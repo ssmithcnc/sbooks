@@ -207,6 +207,12 @@ a {
   border: 1px solid var(--line);
 }
 
+.btn.paypal {
+  color: #fff;
+  background: linear-gradient(135deg, #003087 0%, #009cde 100%);
+  box-shadow: 0 16px 32px rgba(0, 74, 171, 0.22);
+}
+
 .pill {
   display: inline-flex;
   align-items: center;

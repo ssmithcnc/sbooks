@@ -39,7 +39,8 @@ export default function HomePage() {
             <div>1. Set Vercel Root Directory to <code>hosted-payments</code>.</div>
             <div>2. Add Supabase URL and keys.</div>
             <div>3. Add Stripe secret and webhook secret.</div>
-            <div>4. Apply <code>supabase/schema.sql</code> in Supabase.</div>
+            <div>4. Add PayPal client, secret, and webhook id.</div>
+            <div>5. Apply <code>supabase/schema.sql</code> in Supabase.</div>
           </div>
         </aside>
       </section>
