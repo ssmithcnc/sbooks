@@ -1488,6 +1488,75 @@ def publish_invoice_to_hosted_payments(conn, document: dict, settings: dict) -> 
   }
 
 
+def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] | None = None) -> dict:
+  if not supabase_is_configured(settings):
+    return {"updated": 0, "checked": 0}
+
+  query = """SELECT id, number, status, cloud_public_id, payment_url
+             FROM documents
+             WHERE type='invoice' AND cloud_public_id IS NOT NULL AND cloud_public_id != ''"""
+  params = []
+  if document_ids:
+    placeholders = ", ".join("?" for _ in document_ids)
+    query += f" AND id IN ({placeholders})"
+    params.extend(document_ids)
+
+  rows = conn.execute(query, params).fetchall()
+  if not rows:
+    return {"updated": 0, "checked": 0}
+
+  public_ids = [clean_text(row["cloud_public_id"]) for row in rows if clean_text(row["cloud_public_id"])]
+  if not public_ids:
+    return {"updated": 0, "checked": 0}
+
+  remote_rows = supabase_rest_request(
+    settings,
+    "invoices",
+    query={
+      "select": "public_id,payment_status,status,payment_page_url,updated_at",
+      "public_id": f"in.({','.join(public_ids)})",
+    },
+  ) or []
+  remote_by_public_id = {
+    clean_text(item.get("public_id")): item
+    for item in remote_rows
+    if clean_text(item.get("public_id"))
+  }
+
+  updated = 0
+  checked = 0
+  available = document_table_columns(conn)
+  for row in rows:
+    public_id = clean_text(row["cloud_public_id"])
+    remote = remote_by_public_id.get(public_id)
+    if not remote:
+      continue
+    checked += 1
+    remote_payment_status = clean_text(remote.get("payment_status") or remote.get("status") or "synced").lower()
+    local_status = clean_text(row["status"]).lower()
+    updates = {}
+    if "payment_url" in available and clean_text(remote.get("payment_page_url")) and clean_text(remote.get("payment_page_url")) != clean_text(row["payment_url"]):
+      updates["payment_url"] = clean_text(remote.get("payment_page_url"))
+    if "cloud_sync_status" in available:
+      desired_sync_status = "paid" if remote_payment_status == "paid" else "synced"
+      updates["cloud_sync_status"] = desired_sync_status
+    if "cloud_synced_at" in available:
+      updates["cloud_synced_at"] = now_iso()
+    if remote_payment_status == "paid" and local_status != "paid":
+      updates["status"] = "paid"
+    if not updates:
+      continue
+    updates["updated_at"] = now_iso()
+    assignments = ", ".join(f"{column}=?" for column in updates.keys())
+    conn.execute(
+      f"UPDATE documents SET {assignments} WHERE id=?",
+      tuple(updates.values()) + (row["id"],)
+    )
+    updated += 1
+
+  return {"updated": updated, "checked": checked}
+
+
 def build_payment_url(document: dict, settings: dict) -> str:
   base = hosted_payment_base_url(settings)
   public_id = clean_text(document.get("cloud_public_id"))
@@ -1910,6 +1979,20 @@ def list_accounts():
 def get_business_settings():
   with db() as conn:
     return jsonify(business_settings_dict(conn))
+
+
+@app.post("/api/hosted_payments/sync")
+def sync_hosted_payments():
+  try:
+    payload = request.get_json(silent=True) or {}
+    requested_ids = payload.get("document_ids") or []
+    document_ids = [int(doc_id) for doc_id in requested_ids if str(doc_id).strip()]
+    with db() as conn:
+      settings = business_settings_dict(conn)
+      result = sync_hosted_payment_statuses(conn, settings, document_ids=document_ids or None)
+    return jsonify({"ok": True, **result})
+  except Exception as exc:
+    return json_error(str(exc))
 
 
 @app.get("/api/business_logo")

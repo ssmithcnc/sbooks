@@ -353,8 +353,19 @@ function applySmtpPreset(provider, force = false) {
 
 async function loadAll() {
   setStatus("Loading business data...");
-  const [settings, customers, products, documents] = await Promise.all([
-    apiGet("/api/business_settings"),
+  const settings = await apiGet("/api/business_settings");
+  let syncSummary = "";
+  if (settings.supabase_url && settings.supabase_secret_key && settings.invoice_payment_url_base) {
+    try {
+      const sync = await apiJson("/api/hosted_payments/sync", "POST", {});
+      if (sync.updated) {
+        syncSummary = ` Synced ${sync.updated} hosted invoice${sync.updated === 1 ? "" : "s"}.`;
+      }
+    } catch (err) {
+      console.warn("Hosted payment sync failed", err);
+    }
+  }
+  const [customers, products, documents] = await Promise.all([
     apiGet("/api/customers"),
     apiGet("/api/products"),
     apiGet("/api/documents")
@@ -370,7 +381,7 @@ async function loadAll() {
   resetDocumentForm();
   renderImportPreview();
   renderEmailComposer();
-  setStatus("");
+  setStatus(syncSummary.trim());
 }
 
 function escapeHtml(s) {
