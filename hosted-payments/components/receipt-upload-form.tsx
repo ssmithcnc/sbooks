@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
+import { RECEIPT_CATEGORIES } from "@/lib/receipt-categories";
+
 type Props = {
   initialUploaded?: boolean;
   initialReceiptId?: string;
@@ -85,6 +87,7 @@ export function ReceiptUploadForm({
           mimeType: file.type || "application/octet-stream",
           byteSize: file.size,
           vendorName: String(formData.get("vendor_name") || ""),
+          category: String(formData.get("category") || ""),
           receiptDate: String(formData.get("receipt_date") || ""),
           totalAmount: String(formData.get("total_amount") || ""),
           notes: String(formData.get("notes") || ""),
@@ -137,6 +140,17 @@ export function ReceiptUploadForm({
         <label className="field">
           <span>Vendor name</span>
           <input type="text" name="vendor_name" placeholder="Home Depot, Shell, UPS..." />
+        </label>
+        <label className="field">
+          <span>Category</span>
+          <select name="category" defaultValue="">
+            <option value="">Uncategorized</option>
+            {RECEIPT_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
         </label>
         <div className="field-row">
           <label className="field">

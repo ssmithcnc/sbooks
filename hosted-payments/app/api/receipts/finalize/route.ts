@@ -13,6 +13,7 @@ export async function POST(request: Request) {
       mimeType: String(body?.mimeType || ""),
       byteSize: Number(body?.byteSize || 0),
       vendorName: String(body?.vendorName || ""),
+      category: String(body?.category || ""),
       receiptDate: String(body?.receiptDate || ""),
       totalAmount: String(body?.totalAmount || ""),
       notes: String(body?.notes || ""),

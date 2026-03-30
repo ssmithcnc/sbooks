@@ -8,6 +8,7 @@ type ReceiptUploadInput = {
   mimeType?: string | null;
   byteSize?: number | null;
   vendorName?: string | null;
+  category?: string | null;
   receiptDate?: string | null;
   totalAmount?: string | null;
   notes?: string | null;
@@ -33,6 +34,7 @@ type ReceiptUploadRow = {
     mime_type?: string | null;
     original_filename?: string | null;
     byte_size?: number | null;
+    category?: string | null;
     notes?: string | null;
     contact_email?: string | null;
   } | null;
@@ -178,6 +180,7 @@ export async function finalizeReceiptUpload(input: ReceiptUploadInput) {
     original_filename: clean(input.originalFileName) || null,
     mime_type: clean(input.mimeType) || "application/octet-stream",
     byte_size: typeof input.byteSize === "number" ? input.byteSize : null,
+    category: clean(input.category) || null,
     notes: clean(input.notes) || null,
     contact_email: clean(input.contactEmail) || null,
   };

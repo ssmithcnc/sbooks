@@ -92,6 +92,8 @@ export default async function ReceiptsIndexPage() {
                       <div>Uploaded: {formatDate(receipt.created_at)}</div>
                       <div>Receipt date: {receipt.receipt_date || "Unknown"}</div>
                       <div>Total: {formatCurrency(receipt.total_amount)}</div>
+                      <div>Category: {receipt.metadata?.category || "Uncategorized"}</div>
+                      {receipt.metadata?.notes ? <div>Notes: {receipt.metadata.notes}</div> : null}
                       <div>File: {receipt.original_name}</div>
                       <div>Path: {receipt.object_path}</div>
                     </div>
