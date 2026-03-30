@@ -40,6 +40,10 @@ type ReceiptUploadRow = {
   } | null;
 };
 
+export type ReceiptSortKey = "uploaded" | "vendor" | "receipt_date" | "total" | "category" | "status";
+
+export type ReceiptRecord = Awaited<ReturnType<typeof listReceiptUploads>>[number];
+
 function clean(value: string | null | undefined) {
   return String(value || "").trim();
 }
@@ -70,14 +74,25 @@ async function getDefaultBusinessProfile() {
   return profile;
 }
 
-export async function listReceiptUploads(limit = 50) {
+export async function listReceiptUploads(limit = 50, sort: ReceiptSortKey = "uploaded", direction: "asc" | "desc" = "desc") {
   const profile = await getDefaultBusinessProfile();
   const supabase = getSupabaseAdmin();
+
+  const sortColumn =
+    sort === "vendor"
+      ? "vendor_name"
+      : sort === "receipt_date"
+        ? "receipt_date"
+        : sort === "total"
+          ? "total_amount"
+          : sort === "status"
+            ? "status"
+            : "created_at";
 
   const { data, error } = await (supabase.from("receipt_uploads") as any)
     .select("id, object_path, vendor_name, receipt_date, total_amount, status, created_at, metadata")
     .eq("business_profile_id", profile.id)
-    .order("created_at", { ascending: false })
+    .order(sortColumn, { ascending: direction === "asc", nullsFirst: false })
     .limit(limit);
 
   if (error) {
@@ -104,7 +119,53 @@ export async function listReceiptUploads(limit = 50) {
     };
   });
 
-  return Promise.all(rows);
+  const resolved = await Promise.all(rows);
+
+  if (sort === "category") {
+    const sorted = [...resolved].sort((a, b) => {
+      const left = (a.metadata?.category || "").toLowerCase();
+      const right = (b.metadata?.category || "").toLowerCase();
+      return direction === "asc" ? left.localeCompare(right) : right.localeCompare(left);
+    });
+    return sorted;
+  }
+
+  return resolved;
+}
+
+export async function getReceiptUploadById(receiptId: string) {
+  const profile = await getDefaultBusinessProfile();
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await (supabase.from("receipt_uploads") as any)
+    .select("id, object_path, vendor_name, receipt_date, total_amount, status, created_at, metadata")
+    .eq("business_profile_id", profile.id)
+    .eq("id", receiptId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  const row = data as ReceiptUploadRow | null;
+  if (!row) {
+    throw new Error("Receipt not found.");
+  }
+
+  const originalName = row.metadata?.original_filename || row.object_path.split("/").pop() || "receipt";
+  const mimeType = row.metadata?.mime_type || "";
+  const isImage = mimeType.startsWith("image/");
+  const isPdf = mimeType === "application/pdf" || originalName.toLowerCase().endsWith(".pdf");
+  const { data: signed } = await supabase.storage.from("receipts").createSignedUrl(row.object_path, 60 * 60);
+
+  return {
+    ...row,
+    original_name: originalName,
+    mime_type: mimeType,
+    is_image: isImage,
+    is_pdf: isPdf,
+    signed_url: signed?.signedUrl || null,
+  };
 }
 
 export async function deleteReceiptUpload(receiptId: string) {
@@ -213,4 +274,56 @@ export async function finalizeReceiptUpload(input: ReceiptUploadInput) {
     objectPath: data.object_path as string,
     businessName: profile.company_name,
   };
+}
+
+export async function updateReceiptUpload(
+  receiptId: string,
+  input: Omit<ReceiptUploadInput, "objectPath" | "originalFileName" | "mimeType" | "byteSize">
+) {
+  const profile = await getDefaultBusinessProfile();
+  const supabase = getSupabaseAdmin();
+
+  const { data: existing, error: fetchError } = await (supabase.from("receipt_uploads") as any)
+    .select("id, metadata")
+    .eq("business_profile_id", profile.id)
+    .eq("id", receiptId)
+    .single();
+
+  if (fetchError) {
+    throw fetchError;
+  }
+
+  const existingRow = existing as { id: string; metadata?: ReceiptUploadRow["metadata"] } | null;
+  if (!existingRow) {
+    throw new Error("Receipt not found.");
+  }
+
+  const mergedMetadata = {
+    ...(existingRow.metadata || {}),
+    category: clean(input.category) || null,
+    notes: clean(input.notes) || null,
+    contact_email: clean(input.contactEmail) || null,
+  };
+
+  const totalText = clean(input.totalAmount);
+  const parsedTotal = totalText ? Number(totalText) : null;
+
+  const { data, error } = await (supabase.from("receipt_uploads") as any)
+    .update({
+      vendor_name: clean(input.vendorName) || null,
+      receipt_date: clean(input.receiptDate) || null,
+      total_amount: Number.isFinite(parsedTotal) ? parsedTotal : null,
+      metadata: mergedMetadata,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("business_profile_id", profile.id)
+    .eq("id", receiptId)
+    .select("id")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as { id: string };
 }

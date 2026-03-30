@@ -1,9 +1,24 @@
 import Link from "next/link";
 
-import { listReceiptUploads } from "@/lib/receipts";
+import { listReceiptUploads, type ReceiptSortKey } from "@/lib/receipts";
 import { ReceiptDeleteButton } from "@/components/receipt-delete-button";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+const SORT_OPTIONS: Array<{ key: ReceiptSortKey; label: string }> = [
+  { key: "uploaded", label: "Uploaded" },
+  { key: "vendor", label: "Vendor" },
+  { key: "receipt_date", label: "Receipt date" },
+  { key: "total", label: "Total" },
+  { key: "category", label: "Category" },
+  { key: "status", label: "Status" },
+];
+
+type SearchParamsShape =
+  | Promise<Record<string, string | string[] | undefined>>
+  | Record<string, string | string[] | undefined>
+  | undefined;
 
 function formatCurrency(value: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -31,11 +46,33 @@ function formatDate(value: string | null) {
   }).format(date);
 }
 
-export default async function ReceiptsIndexPage() {
-  const receipts = await listReceiptUploads(100);
+function getSingle(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function isSortKey(value: string | undefined): value is ReceiptSortKey {
+  return SORT_OPTIONS.some((option) => option.key === value);
+}
+
+function buildSortHref(sort: ReceiptSortKey, currentSort: ReceiptSortKey, currentDirection: "asc" | "desc") {
+  const nextDirection = currentSort === sort && currentDirection === "asc" ? "desc" : "asc";
+  return `/receipts?sort=${sort}&direction=${nextDirection}`;
+}
+
+export default async function ReceiptsIndexPage({
+  searchParams,
+}: {
+  searchParams?: SearchParamsShape;
+}) {
+  const resolvedSearch = await Promise.resolve(searchParams ?? {});
+  const sortCandidate = getSingle(resolvedSearch.sort);
+  const directionCandidate = getSingle(resolvedSearch.direction);
+  const sort = isSortKey(sortCandidate) ? sortCandidate : "uploaded";
+  const direction = directionCandidate === "asc" ? "asc" : "desc";
+  const receipts = await listReceiptUploads(200, sort, direction);
 
   return (
-    <main className="shell shell-narrow">
+    <main className="shell shell-wide">
       <section className="hero">
         <div className="brand-mark" aria-hidden="true">
           <div className="brand-mark-text">
@@ -44,9 +81,9 @@ export default async function ReceiptsIndexPage() {
           </div>
         </div>
         <div>
-          <div className="hero-title">Receipt Library</div>
+          <div className="hero-title">Receipt Admin</div>
           <div className="hero-subtitle">
-            Every phone image and laptop PDF uploaded into the S-Books receipts bucket.
+            Sort, review, edit, open, and safely delete uploaded receipt records.
           </div>
         </div>
       </section>
@@ -56,7 +93,7 @@ export default async function ReceiptsIndexPage() {
           <div className="receipt-toolbar">
             <div>
               <div className="eyebrow">Cloud bucket</div>
-              <div className="receipt-title">Recent uploads</div>
+              <div className="receipt-title">Sortable receipt records</div>
             </div>
             <div className="cta-row">
               <Link className="btn secondary" href="/receipts/upload">
@@ -66,48 +103,85 @@ export default async function ReceiptsIndexPage() {
           </div>
 
           {receipts.length ? (
-            <div className="receipt-list">
-              {receipts.map((receipt) => (
-                <article className="receipt-item" key={receipt.id}>
-                  <div className="receipt-preview">
-                    {receipt.signed_url && receipt.is_image ? (
-                      <img
-                        className="receipt-thumb"
-                        src={receipt.signed_url}
-                        alt={receipt.original_name}
-                      />
-                    ) : (
-                      <div className="receipt-file-pill">
-                        {receipt.is_pdf ? "PDF" : "FILE"}
-                      </div>
-                    )}
-                  </div>
+            <div className="receipt-admin">
+              <div className="receipt-sortbar">
+                <div className="eyebrow">
+                  Showing {receipts.length} receipt{receipts.length === 1 ? "" : "s"}
+                </div>
+                <div className="receipt-sort-links">
+                  {SORT_OPTIONS.map((option) => (
+                    <Link
+                      key={option.key}
+                      className={`sort-chip ${sort === option.key ? "active" : ""}`}
+                      href={buildSortHref(option.key, sort, direction)}
+                    >
+                      {option.label}
+                      {sort === option.key ? (direction === "asc" ? " ↑" : " ↓") : ""}
+                    </Link>
+                  ))}
+                </div>
+              </div>
 
-                  <div className="receipt-meta">
-                    <div className="receipt-headline">
-                      <strong>{receipt.vendor_name || "Unlabeled receipt"}</strong>
-                      <span className="pill">{receipt.status}</span>
-                    </div>
-                    <div className="details">
-                      <div>Uploaded: {formatDate(receipt.created_at)}</div>
-                      <div>Receipt date: {receipt.receipt_date || "Unknown"}</div>
-                      <div>Total: {formatCurrency(receipt.total_amount)}</div>
-                      <div>Category: {receipt.metadata?.category || "Uncategorized"}</div>
-                      {receipt.metadata?.notes ? <div>Notes: {receipt.metadata.notes}</div> : null}
-                      <div>File: {receipt.original_name}</div>
-                      <div>Path: {receipt.object_path}</div>
-                    </div>
-                    <div className="cta-row">
-                      {receipt.signed_url ? (
-                        <a className="btn primary" href={receipt.signed_url} target="_blank" rel="noopener">
-                          Open file
-                        </a>
-                      ) : null}
-                      <ReceiptDeleteButton receiptId={receipt.id} />
-                    </div>
-                  </div>
-                </article>
-              ))}
+              <div className="receipt-table-wrap">
+                <table className="receipt-table">
+                  <thead>
+                    <tr>
+                      <th>File</th>
+                      <th>Vendor</th>
+                      <th>Receipt date</th>
+                      <th>Total</th>
+                      <th>Category</th>
+                      <th>Notes</th>
+                      <th>Status</th>
+                      <th>Uploaded</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {receipts.map((receipt) => (
+                      <tr key={receipt.id}>
+                        <td>
+                          <div className="receipt-file-cell">
+                            <div className="receipt-mini-preview">
+                              {receipt.signed_url && receipt.is_image ? (
+                                <img className="receipt-thumb" src={receipt.signed_url} alt={receipt.original_name} />
+                              ) : (
+                                <div className="receipt-file-pill">{receipt.is_pdf ? "PDF" : "FILE"}</div>
+                              )}
+                            </div>
+                            <div>
+                              <div className="receipt-file-name">{receipt.original_name}</div>
+                              <div className="receipt-path">{receipt.object_path}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td>{receipt.vendor_name || "Unlabeled receipt"}</td>
+                        <td>{receipt.receipt_date || "Unknown"}</td>
+                        <td>{formatCurrency(receipt.total_amount)}</td>
+                        <td>{receipt.metadata?.category || "Uncategorized"}</td>
+                        <td className="receipt-notes-cell">{receipt.metadata?.notes || "—"}</td>
+                        <td>
+                          <span className="pill">{receipt.status}</span>
+                        </td>
+                        <td>{formatDate(receipt.created_at)}</td>
+                        <td>
+                          <div className="receipt-actions">
+                            <Link className="btn secondary" href={`/receipts/${receipt.id}`}>
+                              Edit
+                            </Link>
+                            {receipt.signed_url ? (
+                              <a className="btn primary" href={receipt.signed_url} target="_blank" rel="noopener">
+                                Open
+                              </a>
+                            ) : null}
+                            <ReceiptDeleteButton receiptId={receipt.id} />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : (
             <div className="notice bad">
