@@ -22,6 +22,7 @@ type BusinessProfileRow = {
 
 type ReceiptUploadRow = {
   id: string;
+  business_profile_id?: string;
   object_path: string;
   vendor_name: string | null;
   receipt_date: string | null;
@@ -85,7 +86,7 @@ export async function listReceiptUploads(limit = 50) {
     const mimeType = row.metadata?.mime_type || "";
     const originalName = row.metadata?.original_filename || row.object_path.split("/").pop() || "receipt";
     const isImage = mimeType.startsWith("image/");
-    const isPdf = mimeType === "application/pdf";
+    const isPdf = mimeType === "application/pdf" || originalName.toLowerCase().endsWith(".pdf");
 
     const { data: signed } = await supabase.storage
       .from("receipts")
@@ -102,6 +103,45 @@ export async function listReceiptUploads(limit = 50) {
   });
 
   return Promise.all(rows);
+}
+
+export async function deleteReceiptUpload(receiptId: string) {
+  const profile = await getDefaultBusinessProfile();
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await (supabase.from("receipt_uploads") as any)
+    .select("id, object_path")
+    .eq("business_profile_id", profile.id)
+    .eq("id", receiptId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  const receipt = data as { id: string; object_path: string } | null;
+  if (!receipt) {
+    throw new Error("Receipt not found.");
+  }
+
+  const { error: storageError } = await supabase.storage.from("receipts").remove([receipt.object_path]);
+  if (storageError) {
+    throw storageError;
+  }
+
+  const { error: deleteError } = await (supabase.from("receipt_uploads") as any)
+    .delete()
+    .eq("id", receipt.id)
+    .eq("business_profile_id", profile.id);
+
+  if (deleteError) {
+    throw deleteError;
+  }
+
+  return {
+    id: receipt.id,
+    objectPath: receipt.object_path,
+  };
 }
 
 export async function createReceiptUploadTarget(input: {

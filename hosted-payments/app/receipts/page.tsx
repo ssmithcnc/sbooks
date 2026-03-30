@@ -1,6 +1,9 @@
 import Link from "next/link";
 
 import { listReceiptUploads } from "@/lib/receipts";
+import { ReceiptDeleteButton } from "@/components/receipt-delete-button";
+
+export const dynamic = "force-dynamic";
 
 function formatCurrency(value: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -98,6 +101,7 @@ export default async function ReceiptsIndexPage() {
                           Open file
                         </a>
                       ) : null}
+                      <ReceiptDeleteButton receiptId={receipt.id} />
                     </div>
                   </div>
                 </article>

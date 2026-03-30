@@ -207,6 +207,12 @@ a {
   border: 1px solid var(--line);
 }
 
+.btn.secondary.danger {
+  color: #9a3412;
+  border-color: rgba(154, 52, 18, 0.22);
+  background: rgba(255, 247, 237, 0.95);
+}
+
 .btn.paypal {
   color: #fff;
   background: linear-gradient(135deg, #003087 0%, #009cde 100%);
