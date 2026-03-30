@@ -41,6 +41,10 @@ a {
   margin: 42px auto 64px;
 }
 
+.shell.shell-wide {
+  width: min(1680px, calc(100vw - 32px));
+}
+
 .hero {
   display: flex;
   align-items: center;
@@ -428,7 +432,7 @@ a {
 
 .receipt-table {
   width: 100%;
-  min-width: 1040px;
+  min-width: 1400px;
   border-collapse: collapse;
 }
 
@@ -456,9 +460,10 @@ a {
 
 .receipt-file-cell {
   display: grid;
-  grid-template-columns: 72px 1fr;
+  grid-template-columns: 72px minmax(260px, 1fr);
   gap: 12px;
   align-items: start;
+  min-width: 0;
 }
 
 .receipt-mini-preview {
@@ -481,6 +486,8 @@ a {
 .receipt-file-name {
   font-weight: 700;
   color: var(--ink);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
@@ -489,13 +496,15 @@ a {
   color: var(--ink-soft);
   font-size: 0.84rem;
   line-height: 1.45;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .receipt-notes-cell {
-  min-width: 220px;
+  min-width: 260px;
   color: var(--ink-soft);
   line-height: 1.5;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
