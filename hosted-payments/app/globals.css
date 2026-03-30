@@ -694,6 +694,12 @@ body {
   border-color: rgba(147, 177, 214, 0.18);
 }
 
+.field select option,
+.filters-row select option {
+  color: var(--ink);
+  background: #0f1b2d;
+}
+
 .receipt-table th {
   background: rgba(8, 18, 34, 0.96);
   color: #9bb2cc;

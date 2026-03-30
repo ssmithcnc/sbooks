@@ -116,6 +116,7 @@ export default async function ReceiptsIndexPage({
                   <thead>
                     <tr>
                       <th>Vendor</th>
+                      <th>Category</th>
                       <th>Date</th>
                       <th>Total</th>
                       <th>Status</th>
@@ -129,6 +130,7 @@ export default async function ReceiptsIndexPage({
                     {receipts.map((receipt: Awaited<ReturnType<typeof listReceipts>>[number]) => (
                       <tr key={receipt.id}>
                         <td>{receipt.vendor || "Unknown vendor"}</td>
+                        <td>{receipt.expense_category || "Not set"}</td>
                         <td>{receipt.receipt_date ? formatDate(receipt.receipt_date) : "Unknown"}</td>
                         <td>{formatCurrency(receipt.total)}</td>
                         <td>
