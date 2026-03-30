@@ -15,10 +15,7 @@ const SORT_OPTIONS: Array<{ key: ReceiptSortKey; label: string }> = [
   { key: "status", label: "Status" },
 ];
 
-type SearchParamsShape =
-  | Promise<Record<string, string | string[] | undefined>>
-  | Record<string, string | string[] | undefined>
-  | undefined;
+type SearchParamsShape = Promise<Record<string, string | string[] | undefined>> | undefined;
 
 function formatCurrency(value: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -64,7 +61,7 @@ export default async function ReceiptsIndexPage({
 }: {
   searchParams?: SearchParamsShape;
 }) {
-  const resolvedSearch = await Promise.resolve(searchParams ?? {});
+  const resolvedSearch = (await searchParams) ?? {};
   const sortCandidate = getSingle(resolvedSearch.sort);
   const directionCandidate = getSingle(resolvedSearch.direction);
   const sort = isSortKey(sortCandidate) ? sortCandidate : "uploaded";
@@ -110,14 +107,14 @@ export default async function ReceiptsIndexPage({
                 </div>
                 <div className="receipt-sort-links">
                   {SORT_OPTIONS.map((option) => (
-                    <Link
+                    <a
                       key={option.key}
                       className={`sort-chip ${sort === option.key ? "active" : ""}`}
                       href={buildSortHref(option.key, sort, direction)}
                     >
                       {option.label}
                       {sort === option.key ? (direction === "asc" ? " ↑" : " ↓") : ""}
-                    </Link>
+                    </a>
                   ))}
                 </div>
               </div>

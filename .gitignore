@@ -27,3 +27,6 @@ Thumbs.db
 .vscode/
 
 *.log
+
+hosted-payments/.next/
+hosted-payments/node_modules/
