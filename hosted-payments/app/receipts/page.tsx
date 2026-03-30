@@ -1,19 +1,10 @@
 import Link from "next/link";
 
-import { listReceiptUploads, type ReceiptSortKey } from "@/lib/receipts";
-import { ReceiptDeleteButton } from "@/components/receipt-delete-button";
+import { ReceiptUploadDropzone } from "@/components/receipt-upload-dropzone";
+import { listReceipts, type ReceiptStatus } from "@/lib/receipts";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-const SORT_OPTIONS: Array<{ key: ReceiptSortKey; label: string }> = [
-  { key: "uploaded", label: "Uploaded" },
-  { key: "vendor", label: "Vendor" },
-  { key: "receipt_date", label: "Receipt date" },
-  { key: "total", label: "Total" },
-  { key: "category", label: "Category" },
-  { key: "status", label: "Status" },
-];
 
 type SearchParamsShape = Promise<Record<string, string | string[] | undefined>> | undefined;
 
@@ -28,15 +19,9 @@ function formatCurrency(value: number | null) {
 }
 
 function formatDate(value: string | null) {
-  if (!value) {
-    return "Unknown";
-  }
-
+  if (!value) return "Unknown";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
+  if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -47,13 +32,8 @@ function getSingle(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function isSortKey(value: string | undefined): value is ReceiptSortKey {
-  return SORT_OPTIONS.some((option) => option.key === value);
-}
-
-function buildSortHref(sort: ReceiptSortKey, currentSort: ReceiptSortKey, currentDirection: "asc" | "desc") {
-  const nextDirection = currentSort === sort && currentDirection === "asc" ? "desc" : "asc";
-  return `/receipts?sort=${sort}&direction=${nextDirection}`;
+function isStatus(value: string | undefined): value is ReceiptStatus | "all" {
+  return value === "all" || value === "needs_review" || value === "approved" || value === "flagged";
 }
 
 export default async function ReceiptsIndexPage({
@@ -62,26 +42,18 @@ export default async function ReceiptsIndexPage({
   searchParams?: SearchParamsShape;
 }) {
   const resolvedSearch = (await searchParams) ?? {};
-  const sortCandidate = getSingle(resolvedSearch.sort);
-  const directionCandidate = getSingle(resolvedSearch.direction);
-  const sort = isSortKey(sortCandidate) ? sortCandidate : "uploaded";
-  const direction = directionCandidate === "asc" ? "asc" : "desc";
-  const receipts = await listReceiptUploads(200, sort, direction);
+  const statusCandidate = getSingle(resolvedSearch.status);
+  const search = getSingle(resolvedSearch.search) || "";
+  const status = isStatus(statusCandidate) ? statusCandidate : "all";
+  const receipts = await listReceipts({ status, search });
 
   return (
     <main className="shell shell-wide">
       <section className="hero">
-        <div className="brand-mark" aria-hidden="true">
-          <div className="brand-mark-text">
-            <strong>S</strong>
-            <span>books</span>
-          </div>
-        </div>
         <div>
-          <div className="hero-title">Receipt Admin</div>
-          <div className="hero-subtitle">
-            Sort, review, edit, open, and safely delete uploaded receipt records.
-          </div>
+          <div className="eyebrow">Inbox</div>
+          <div className="hero-title">Receipt review queue</div>
+          <div className="hero-subtitle">Search, filter, and approve receipts with as few clicks as possible.</div>
         </div>
       </section>
 
@@ -89,13 +61,42 @@ export default async function ReceiptsIndexPage({
         <article className="card">
           <div className="receipt-toolbar">
             <div>
-              <div className="eyebrow">Cloud bucket</div>
-              <div className="receipt-title">Sortable receipt records</div>
+              <div className="eyebrow">Workflow</div>
+              <div className="receipt-title">Needs review inbox</div>
             </div>
             <div className="cta-row">
-              <Link className="btn secondary" href="/receipts/upload">
-                Upload another receipt
-              </Link>
+              <Link className="btn secondary" href="/receipts/upload">Open upload page</Link>
+            </div>
+          </div>
+
+          <div className="dashboard-grid">
+            <div className="card inset">
+              <div className="eyebrow">Quick upload</div>
+              <div className="section-title">Drop a receipt</div>
+              <ReceiptUploadDropzone />
+            </div>
+
+            <div className="card inset">
+              <div className="eyebrow">Filters</div>
+              <form className="filters-row" method="get">
+                <label className="field">
+                  <span>Search</span>
+                  <input defaultValue={search} name="search" placeholder="Vendor, order number, raw text..." />
+                </label>
+                <label className="field">
+                  <span>Status</span>
+                  <select defaultValue={status} name="status">
+                    <option value="all">All</option>
+                    <option value="needs_review">Needs review</option>
+                    <option value="approved">Approved</option>
+                    <option value="flagged">Flagged</option>
+                  </select>
+                </label>
+                <div className="cta-row filters-actions">
+                  <button className="btn primary" type="submit">Apply</button>
+                  <Link className="btn secondary" href="/receipts">Reset</Link>
+                </div>
+              </form>
             </div>
           </div>
 
@@ -106,16 +107,7 @@ export default async function ReceiptsIndexPage({
                   Showing {receipts.length} receipt{receipts.length === 1 ? "" : "s"}
                 </div>
                 <div className="receipt-sort-links">
-                  {SORT_OPTIONS.map((option) => (
-                    <a
-                      key={option.key}
-                      className={`sort-chip ${sort === option.key ? "active" : ""}`}
-                      href={buildSortHref(option.key, sort, direction)}
-                    >
-                      {option.label}
-                      {sort === option.key ? (direction === "asc" ? " ↑" : " ↓") : ""}
-                    </a>
-                  ))}
+                  <span className="sort-chip active">Newest first</span>
                 </div>
               </div>
 
@@ -123,55 +115,31 @@ export default async function ReceiptsIndexPage({
                 <table className="receipt-table">
                   <thead>
                     <tr>
-                      <th>File</th>
                       <th>Vendor</th>
-                      <th>Receipt date</th>
+                      <th>Date</th>
                       <th>Total</th>
-                      <th>Category</th>
-                      <th>Notes</th>
                       <th>Status</th>
+                      <th>Confidence</th>
+                      <th>Source</th>
                       <th>Uploaded</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {receipts.map((receipt) => (
+                    {receipts.map((receipt: Awaited<ReturnType<typeof listReceipts>>[number]) => (
                       <tr key={receipt.id}>
+                        <td>{receipt.vendor || "Unknown vendor"}</td>
+                        <td>{receipt.receipt_date ? formatDate(receipt.receipt_date) : "Unknown"}</td>
+                        <td>{formatCurrency(receipt.total)}</td>
                         <td>
-                          <div className="receipt-file-cell">
-                            <div className="receipt-mini-preview">
-                              {receipt.signed_url && receipt.is_image ? (
-                                <img className="receipt-thumb" src={receipt.signed_url} alt={receipt.original_name} />
-                              ) : (
-                                <div className="receipt-file-pill">{receipt.is_pdf ? "PDF" : "FILE"}</div>
-                              )}
-                            </div>
-                            <div>
-                              <div className="receipt-file-name">{receipt.original_name}</div>
-                              <div className="receipt-path">{receipt.object_path}</div>
-                            </div>
-                          </div>
+                          <span className={`pill status-${receipt.status}`}>{receipt.status.replace("_", " ")}</span>
                         </td>
-                        <td>{receipt.vendor_name || "Unlabeled receipt"}</td>
-                        <td>{receipt.receipt_date || "Unknown"}</td>
-                        <td>{formatCurrency(receipt.total_amount)}</td>
-                        <td>{receipt.metadata?.category || "Uncategorized"}</td>
-                        <td className="receipt-notes-cell">{receipt.metadata?.notes || "—"}</td>
-                        <td>
-                          <span className="pill">{receipt.status}</span>
-                        </td>
+                        <td>{Math.round((receipt.confidence || 0) * 100)}%</td>
+                        <td>{receipt.source}</td>
                         <td>{formatDate(receipt.created_at)}</td>
                         <td>
                           <div className="receipt-actions">
-                            <Link className="btn secondary" href={`/receipts/${receipt.id}`}>
-                              Edit
-                            </Link>
-                            {receipt.signed_url ? (
-                              <a className="btn primary" href={receipt.signed_url} target="_blank" rel="noopener">
-                                Open
-                              </a>
-                            ) : null}
-                            <ReceiptDeleteButton receiptId={receipt.id} />
+                            <Link className="btn primary" href={`/receipts/${receipt.id}`}>Review</Link>
                           </div>
                         </td>
                       </tr>
@@ -181,9 +149,7 @@ export default async function ReceiptsIndexPage({
               </div>
             </div>
           ) : (
-            <div className="notice bad">
-              No receipts found yet. Upload one from your phone or laptop to populate this library.
-            </div>
+            <div className="notice bad">No receipts matched this filter yet.</div>
           )}
         </article>
       </section>

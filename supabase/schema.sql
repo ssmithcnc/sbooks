@@ -106,3 +106,78 @@ create table if not exists receipt_ocr_results (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create table if not exists receipts (
+  id uuid primary key default gen_random_uuid(),
+  vendor text,
+  receipt_date timestamptz,
+  order_number text,
+  total numeric(12,2),
+  tax numeric(12,2),
+  confidence numeric(5,4) not null default 0,
+  source text not null default 'upload',
+  raw_text text,
+  structured jsonb not null default '{}'::jsonb,
+  status text not null default 'needs_review',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint receipts_status_check check (status in ('needs_review', 'approved', 'flagged'))
+);
+
+alter table receipts add column if not exists updated_at timestamptz not null default now();
+alter table receipts add column if not exists structured jsonb not null default '{}'::jsonb;
+alter table receipts add column if not exists status text not null default 'needs_review';
+alter table receipts add column if not exists source text not null default 'upload';
+alter table receipts add column if not exists confidence numeric(5,4) not null default 0;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'receipts_status_check'
+  ) then
+    alter table receipts
+      add constraint receipts_status_check
+      check (status in ('needs_review', 'approved', 'flagged'));
+  end if;
+end $$;
+
+create index if not exists idx_receipts_status_created_at on receipts(status, created_at desc);
+create index if not exists idx_receipts_vendor on receipts(vendor);
+create index if not exists idx_receipts_receipt_date on receipts(receipt_date desc);
+
+create table if not exists receipt_items (
+  id uuid primary key default gen_random_uuid(),
+  receipt_id uuid not null references receipts(id) on delete cascade,
+  description text not null default '',
+  quantity numeric(12,2) not null default 1,
+  unit_price numeric(12,2),
+  total_price numeric(12,2),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table receipt_items add column if not exists created_at timestamptz not null default now();
+alter table receipt_items add column if not exists updated_at timestamptz not null default now();
+create index if not exists idx_receipt_items_receipt on receipt_items(receipt_id);
+
+create table if not exists receipt_files (
+  id uuid primary key default gen_random_uuid(),
+  receipt_id uuid not null references receipts(id) on delete cascade,
+  bucket_name text not null default 'receipts',
+  file_type text,
+  file_path text not null,
+  original_name text,
+  mime_type text,
+  byte_size bigint,
+  page_count integer,
+  created_at timestamptz not null default now()
+);
+
+alter table receipt_files add column if not exists bucket_name text not null default 'receipts';
+alter table receipt_files add column if not exists original_name text;
+alter table receipt_files add column if not exists mime_type text;
+alter table receipt_files add column if not exists byte_size bigint;
+alter table receipt_files add column if not exists page_count integer;
+create index if not exists idx_receipt_files_receipt on receipt_files(receipt_id);

@@ -2,328 +2,366 @@ import { randomUUID } from "crypto";
 
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
-type ReceiptUploadInput = {
-  objectPath: string;
-  originalFileName?: string | null;
-  mimeType?: string | null;
-  byteSize?: number | null;
-  vendorName?: string | null;
-  category?: string | null;
-  receiptDate?: string | null;
-  totalAmount?: string | null;
-  notes?: string | null;
-  contactEmail?: string | null;
+export type ReceiptStatus = "needs_review" | "approved" | "flagged";
+
+export type ReceiptListFilters = {
+  search?: string;
+  status?: ReceiptStatus | "all";
 };
 
-type BusinessProfileRow = {
+export type ReceiptItemRecord = {
   id: string;
-  slug: string;
-  company_name: string;
+  description: string;
+  quantity: number | null;
+  unit_price: number | null;
+  total_price: number | null;
 };
 
-type ReceiptUploadRow = {
+export type ReceiptFileRecord = {
   id: string;
-  business_profile_id?: string;
-  object_path: string;
-  vendor_name: string | null;
+  bucket_name: string;
+  file_type: string | null;
+  file_path: string;
+  original_name: string | null;
+  mime_type: string | null;
+  byte_size: number | null;
+  page_count: number | null;
+  signed_url: string | null;
+  is_pdf: boolean;
+  is_image: boolean;
+};
+
+type ReceiptRow = {
+  id: string;
+  vendor: string | null;
   receipt_date: string | null;
-  total_amount: number | null;
-  status: string;
+  order_number: string | null;
+  total: number | null;
+  tax: number | null;
+  confidence: number | null;
+  source: string;
+  raw_text: string | null;
+  structured: Record<string, unknown> | null;
+  status: ReceiptStatus;
   created_at: string;
-  metadata: {
-    mime_type?: string | null;
-    original_filename?: string | null;
-    byte_size?: number | null;
-    category?: string | null;
-    notes?: string | null;
-    contact_email?: string | null;
-  } | null;
+  updated_at: string;
 };
 
-export type ReceiptSortKey = "uploaded" | "vendor" | "receipt_date" | "total" | "category" | "status";
+export type ReceiptRecord = ReceiptRow & {
+  items: ReceiptItemRecord[];
+  files: ReceiptFileRecord[];
+  primary_file: ReceiptFileRecord | null;
+};
 
-export type ReceiptRecord = Awaited<ReturnType<typeof listReceiptUploads>>[number];
+type ReceiptUpdateInput = {
+  vendor: string;
+  receiptDate: string;
+  orderNumber: string;
+  total: string;
+  tax: string;
+  status: ReceiptStatus;
+  items: Array<{
+    description: string;
+    quantity: string;
+    unit_price: string;
+    total_price: string;
+  }>;
+};
 
 function clean(value: string | null | undefined) {
   return String(value || "").trim();
+}
+
+function parseNumber(value: string | number | null | undefined) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  const normalized = clean(value).replace(/[^0-9.-]/g, "");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function safeFileName(name: string | null | undefined) {
   return clean(name)
     .replace(/[^a-zA-Z0-9._-]+/g, "-")
     .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "") || "receipt-upload";
+    .replace(/^-|-$/g, "") || "receipt";
 }
 
-async function getDefaultBusinessProfile() {
+async function withSignedUrls(files: Array<Omit<ReceiptFileRecord, "signed_url" | "is_pdf" | "is_image">>) {
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("business_profiles")
-    .select("id, slug, company_name")
-    .limit(1)
-    .returns<BusinessProfileRow[]>();
+  return Promise.all(
+    files.map(async (file) => {
+      const mime = file.mime_type || "";
+      const isPdf = mime === "application/pdf" || clean(file.original_name).toLowerCase().endsWith(".pdf");
+      const isImage = mime.startsWith("image/");
+      const { data } = await supabase.storage.from(file.bucket_name || "receipts").createSignedUrl(file.file_path, 60 * 60);
 
-  if (error) {
-    throw error;
-  }
-
-  const [profile] = data || [];
-  if (!profile) {
-    throw new Error("No hosted business profile found yet. Publish an invoice payment link first.");
-  }
-  return profile;
+      return {
+        ...file,
+        signed_url: data?.signedUrl || null,
+        is_pdf: isPdf,
+        is_image: isImage,
+      };
+    }),
+  );
 }
 
-export async function listReceiptUploads(limit = 50, sort: ReceiptSortKey = "uploaded", direction: "asc" | "desc" = "desc") {
-  const profile = await getDefaultBusinessProfile();
+export async function listReceipts(filters: ReceiptListFilters = {}) {
   const supabase = getSupabaseAdmin();
+  let query = (supabase.from("receipts") as any)
+    .select("id, vendor, receipt_date, order_number, total, tax, confidence, source, raw_text, structured, status, created_at, updated_at")
+    .order("created_at", { ascending: false })
+    .limit(200);
 
-  const sortColumn =
-    sort === "vendor"
-      ? "vendor_name"
-      : sort === "receipt_date"
-        ? "receipt_date"
-        : sort === "total"
-          ? "total_amount"
-          : sort === "status"
-            ? "status"
-            : "created_at";
-
-  const { data, error } = await (supabase.from("receipt_uploads") as any)
-    .select("id, object_path, vendor_name, receipt_date, total_amount, status, created_at, metadata")
-    .eq("business_profile_id", profile.id)
-    .order(sortColumn, { ascending: direction === "asc", nullsFirst: false })
-    .limit(limit);
-
-  if (error) {
-    throw error;
+  if (filters.status && filters.status !== "all") {
+    query = query.eq("status", filters.status);
   }
 
-  const rows = ((data || []) as ReceiptUploadRow[]).map(async (row) => {
-    const mimeType = row.metadata?.mime_type || "";
-    const originalName = row.metadata?.original_filename || row.object_path.split("/").pop() || "receipt";
-    const isImage = mimeType.startsWith("image/");
-    const isPdf = mimeType === "application/pdf" || originalName.toLowerCase().endsWith(".pdf");
+  if (clean(filters.search)) {
+    const value = clean(filters.search).replace(/[%(),]/g, " ");
+    query = query.or(`vendor.ilike.%${value}%,order_number.ilike.%${value}%,raw_text.ilike.%${value}%`);
+  }
 
-    const { data: signed } = await supabase.storage
-      .from("receipts")
-      .createSignedUrl(row.object_path, 60 * 60);
+  const { data, error } = await query;
+  if (error) throw error;
 
-    return {
-      ...row,
-      original_name: originalName,
-      mime_type: mimeType,
-      is_image: isImage,
-      is_pdf: isPdf,
-      signed_url: signed?.signedUrl || null,
-    };
+  const rows = (data || []) as ReceiptRow[];
+  if (!rows.length) return [];
+
+  const receiptIds = rows.map((row) => row.id);
+  const { data: files, error: fileError } = await (supabase.from("receipt_files") as any)
+    .select("id, receipt_id, bucket_name, file_type, file_path, original_name, mime_type, byte_size, page_count")
+    .in("receipt_id", receiptIds);
+
+  if (fileError) throw fileError;
+
+  const fileMap = new Map<string, ReceiptFileRecord[]>();
+
+  for (const file of (files || []) as any[]) {
+    const signed = await withSignedUrls([
+      {
+        id: file.id,
+        bucket_name: file.bucket_name || "receipts",
+        file_type: file.file_type,
+        file_path: file.file_path,
+        original_name: file.original_name,
+        mime_type: file.mime_type,
+        byte_size: file.byte_size,
+        page_count: file.page_count,
+      },
+    ]);
+
+    const current = fileMap.get(String(file.receipt_id)) || [];
+    current.push(signed[0]);
+    fileMap.set(String(file.receipt_id), current);
+  }
+
+  return rows.map((row: ReceiptRow) => ({
+    ...row,
+    files: fileMap.get(row.id) || [],
+    primary_file: (fileMap.get(row.id) || [])[0] || null,
+  }));
+}
+
+export async function getReceiptById(receiptId: string): Promise<ReceiptRecord> {
+  const supabase = getSupabaseAdmin();
+  const { data: receipt, error } = await (supabase.from("receipts") as any)
+    .select("id, vendor, receipt_date, order_number, total, tax, confidence, source, raw_text, structured, status, created_at, updated_at")
+    .eq("id", receiptId)
+    .single();
+
+  if (error) throw error;
+
+  const { data: items, error: itemError } = await (supabase.from("receipt_items") as any)
+    .select("id, description, quantity, unit_price, total_price")
+    .eq("receipt_id", receiptId)
+    .order("created_at", { ascending: true });
+
+  if (itemError) throw itemError;
+
+  const { data: files, error: fileError } = await (supabase.from("receipt_files") as any)
+    .select("id, bucket_name, file_type, file_path, original_name, mime_type, byte_size, page_count")
+    .eq("receipt_id", receiptId)
+    .order("created_at", { ascending: true });
+
+  if (fileError) throw fileError;
+
+  const signedFiles = await withSignedUrls(
+    (files || []).map((file: any) => ({
+      id: file.id,
+      bucket_name: file.bucket_name || "receipts",
+      file_type: file.file_type,
+      file_path: file.file_path,
+      original_name: file.original_name,
+      mime_type: file.mime_type,
+      byte_size: file.byte_size,
+      page_count: file.page_count,
+    })),
+  );
+
+  return {
+    ...(receipt as ReceiptRow),
+    items: (items || []) as ReceiptItemRecord[],
+    files: signedFiles,
+    primary_file: signedFiles[0] || null,
+  };
+}
+
+export async function updateReceipt(receiptId: string, input: ReceiptUpdateInput) {
+  const supabase = getSupabaseAdmin();
+  const { error: updateError } = await (supabase.from("receipts") as any)
+    .update({
+      vendor: clean(input.vendor) || null,
+      receipt_date: clean(input.receiptDate) || null,
+      order_number: clean(input.orderNumber) || null,
+      total: parseNumber(input.total),
+      tax: parseNumber(input.tax),
+      status: input.status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", receiptId);
+
+  if (updateError) throw updateError;
+
+  const { error: deleteError } = await (supabase.from("receipt_items") as any).delete().eq("receipt_id", receiptId);
+  if (deleteError) throw deleteError;
+
+  const normalizedItems = input.items
+    .map((item) => ({
+      receipt_id: receiptId,
+      description: clean(item.description),
+      quantity: parseNumber(item.quantity) ?? 1,
+      unit_price: parseNumber(item.unit_price),
+      total_price: parseNumber(item.total_price),
+      updated_at: new Date().toISOString(),
+    }))
+    .filter((item) => item.description);
+
+  if (normalizedItems.length) {
+    const { error: insertError } = await (supabase.from("receipt_items") as any).insert(normalizedItems);
+    if (insertError) throw insertError;
+  }
+
+  return getReceiptById(receiptId);
+}
+
+async function callReceiptEdgeFunction(file: File, objectPath: string) {
+  const url = process.env.SUPABASE_RECEIPT_EDGE_FUNCTION_URL;
+  const secret = process.env.SUPABASE_SECRET_KEY;
+  if (!url || !secret) return null;
+
+  const bytes = await file.arrayBuffer();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${secret}`,
+    },
+    body: JSON.stringify({
+      source: "upload",
+      attachments: [
+        {
+          filename: file.name,
+          content_type: file.type || "application/octet-stream",
+          data: Buffer.from(bytes).toString("base64"),
+          size: file.size,
+          file_path: objectPath,
+          bucket_name: "receipts",
+        },
+      ],
+    }),
   });
 
-  const resolved = await Promise.all(rows);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Receipt edge function failed (${response.status}): ${text}`);
+  }
 
-  if (sort === "category") {
-    const sorted = [...resolved].sort((a, b) => {
-      const left = (a.metadata?.category || "").toLowerCase();
-      const right = (b.metadata?.category || "").toLowerCase();
-      return direction === "asc" ? left.localeCompare(right) : right.localeCompare(left);
+  const data = await response.json();
+  return data?.success && data?.id ? String(data.id) : null;
+}
+
+export async function uploadReceiptFromForm(formData: FormData) {
+  const supabase = getSupabaseAdmin();
+  const file = formData.get("file");
+  if (!(file instanceof File) || !file.size) {
+    throw new Error("A receipt file is required.");
+  }
+
+  const objectPath = `uploads/${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${safeFileName(file.name)}`;
+  const bytes = await file.arrayBuffer();
+
+  const { error: uploadError } = await supabase.storage.from("receipts").upload(objectPath, bytes, {
+    contentType: file.type || "application/octet-stream",
+    upsert: false,
+  });
+  if (uploadError) throw uploadError;
+
+  let receiptId: string | null = null;
+
+  try {
+    receiptId = await callReceiptEdgeFunction(file, objectPath);
+  } catch (error) {
+    console.error("Receipt edge function unavailable, using fallback insert", error);
+  }
+
+  if (!receiptId) {
+    receiptId = randomUUID();
+    const { error: receiptError } = await (supabase.from("receipts") as any).insert({
+      id: receiptId,
+      vendor: null,
+      receipt_date: null,
+      order_number: null,
+      total: null,
+      tax: null,
+      confidence: 0.2,
+      source: "upload",
+      raw_text: "",
+      structured: { parse_pending: true },
+      status: "needs_review",
+      updated_at: new Date().toISOString(),
     });
-    return sorted;
+
+    if (receiptError) throw receiptError;
   }
 
-  return resolved;
-}
-
-export async function getReceiptUploadById(receiptId: string) {
-  const profile = await getDefaultBusinessProfile();
-  const supabase = getSupabaseAdmin();
-
-  const { data, error } = await (supabase.from("receipt_uploads") as any)
-    .select("id, object_path, vendor_name, receipt_date, total_amount, status, created_at, metadata")
-    .eq("business_profile_id", profile.id)
-    .eq("id", receiptId)
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  const row = data as ReceiptUploadRow | null;
-  if (!row) {
-    throw new Error("Receipt not found.");
-  }
-
-  const originalName = row.metadata?.original_filename || row.object_path.split("/").pop() || "receipt";
-  const mimeType = row.metadata?.mime_type || "";
-  const isImage = mimeType.startsWith("image/");
-  const isPdf = mimeType === "application/pdf" || originalName.toLowerCase().endsWith(".pdf");
-  const { data: signed } = await supabase.storage.from("receipts").createSignedUrl(row.object_path, 60 * 60);
-
-  return {
-    ...row,
-    original_name: originalName,
-    mime_type: mimeType,
-    is_image: isImage,
-    is_pdf: isPdf,
-    signed_url: signed?.signedUrl || null,
-  };
-}
-
-export async function deleteReceiptUpload(receiptId: string) {
-  const profile = await getDefaultBusinessProfile();
-  const supabase = getSupabaseAdmin();
-
-  const { data, error } = await (supabase.from("receipt_uploads") as any)
-    .select("id, object_path")
-    .eq("business_profile_id", profile.id)
-    .eq("id", receiptId)
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  const receipt = data as { id: string; object_path: string } | null;
-  if (!receipt) {
-    throw new Error("Receipt not found.");
-  }
-
-  const { error: storageError } = await supabase.storage.from("receipts").remove([receipt.object_path]);
-  if (storageError) {
-    throw storageError;
-  }
-
-  const { error: deleteError } = await (supabase.from("receipt_uploads") as any)
-    .delete()
-    .eq("id", receipt.id)
-    .eq("business_profile_id", profile.id);
-
-  if (deleteError) {
-    throw deleteError;
-  }
-
-  return {
-    id: receipt.id,
-    objectPath: receipt.object_path,
-  };
-}
-
-export async function createReceiptUploadTarget(input: {
-  fileName?: string | null;
-  contentType?: string | null;
-}) {
-  const profile = await getDefaultBusinessProfile();
-  const supabase = getSupabaseAdmin();
-
-  const fileName = safeFileName(input.fileName);
-  const today = new Date().toISOString().slice(0, 10);
-  const objectPath = `${profile.slug}/${today}/${randomUUID()}-${fileName}`;
-
-  const { data, error } = await supabase.storage
-    .from("receipts")
-    .createSignedUploadUrl(objectPath);
-
-  if (error) {
-    throw error;
-  }
-
-  return {
-    objectPath,
-    token: data.token,
-    businessName: profile.company_name,
-  };
-}
-
-export async function finalizeReceiptUpload(input: ReceiptUploadInput) {
-  const profile = await getDefaultBusinessProfile();
-  const supabase = getSupabaseAdmin();
-
-  const metadata = {
-    original_filename: clean(input.originalFileName) || null,
-    mime_type: clean(input.mimeType) || "application/octet-stream",
-    byte_size: typeof input.byteSize === "number" ? input.byteSize : null,
-    category: clean(input.category) || null,
-    notes: clean(input.notes) || null,
-    contact_email: clean(input.contactEmail) || null,
-  };
-
-  const totalText = clean(input.totalAmount);
-  const parsedTotal = totalText ? Number(totalText) : null;
-
-  const { data, error } = await (supabase.from("receipt_uploads") as any)
-    .insert({
-      business_profile_id: profile.id,
-      source: "mobile-web",
-      bucket_name: "receipts",
-      object_path: input.objectPath,
-      vendor_name: clean(input.vendorName) || null,
-      receipt_date: clean(input.receiptDate) || null,
-      total_amount: Number.isFinite(parsedTotal) ? parsedTotal : null,
-      status: "uploaded",
-      metadata,
-      updated_at: new Date().toISOString(),
-    })
-    .select("id, object_path")
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  return {
-    id: data.id as string,
-    objectPath: data.object_path as string,
-    businessName: profile.company_name,
-  };
-}
-
-export async function updateReceiptUpload(
-  receiptId: string,
-  input: Omit<ReceiptUploadInput, "objectPath" | "originalFileName" | "mimeType" | "byteSize">
-) {
-  const profile = await getDefaultBusinessProfile();
-  const supabase = getSupabaseAdmin();
-
-  const { data: existing, error: fetchError } = await (supabase.from("receipt_uploads") as any)
-    .select("id, metadata")
-    .eq("business_profile_id", profile.id)
-    .eq("id", receiptId)
-    .single();
-
-  if (fetchError) {
-    throw fetchError;
-  }
-
-  const existingRow = existing as { id: string; metadata?: ReceiptUploadRow["metadata"] } | null;
-  if (!existingRow) {
-    throw new Error("Receipt not found.");
-  }
-
-  const mergedMetadata = {
-    ...(existingRow.metadata || {}),
-    category: clean(input.category) || null,
-    notes: clean(input.notes) || null,
-    contact_email: clean(input.contactEmail) || null,
-  };
-
-  const totalText = clean(input.totalAmount);
-  const parsedTotal = totalText ? Number(totalText) : null;
-
-  const { data, error } = await (supabase.from("receipt_uploads") as any)
-    .update({
-      vendor_name: clean(input.vendorName) || null,
-      receipt_date: clean(input.receiptDate) || null,
-      total_amount: Number.isFinite(parsedTotal) ? parsedTotal : null,
-      metadata: mergedMetadata,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("business_profile_id", profile.id)
-    .eq("id", receiptId)
+  const { data: existingFile } = await (supabase.from("receipt_files") as any)
     .select("id")
-    .single();
+    .eq("receipt_id", receiptId)
+    .eq("file_path", objectPath)
+    .maybeSingle();
 
-  if (error) {
-    throw error;
+  if (!existingFile) {
+    const { error: fileError } = await (supabase.from("receipt_files") as any).insert({
+      receipt_id: receiptId,
+      bucket_name: "receipts",
+      file_type: file.type === "application/pdf" ? "pdf" : file.type.startsWith("image/") ? "image" : "file",
+      file_path: objectPath,
+      original_name: file.name,
+      mime_type: file.type || "application/octet-stream",
+      byte_size: file.size,
+    });
+
+    if (fileError) throw fileError;
   }
 
-  return data as { id: string };
+  return getReceiptById(receiptId);
+}
+
+export async function deleteReceipt(receiptId: string) {
+  const receipt = await getReceiptById(receiptId);
+  const supabase = getSupabaseAdmin();
+
+  const paths = receipt.files.map((file) => file.file_path).filter(Boolean);
+  if (paths.length) {
+    const { error: removeError } = await supabase.storage.from("receipts").remove(paths);
+    if (removeError) throw removeError;
+  }
+
+  const { error } = await (supabase.from("receipts") as any).delete().eq("id", receiptId);
+  if (error) throw error;
+
+  return { id: receiptId };
 }

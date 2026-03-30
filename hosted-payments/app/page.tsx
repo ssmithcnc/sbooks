@@ -4,50 +4,35 @@ export default function HomePage() {
   return (
     <main className="shell">
       <section className="hero">
-        <div className="brand-mark" aria-hidden="true">
-          <div className="brand-mark-text">
-            <strong>S</strong>
-            <span>books</span>
-          </div>
-        </div>
         <div>
-          <div className="hero-title">S-Books Hosted Payments</div>
+          <div className="eyebrow">Receipts</div>
+          <div className="hero-title">Receipt ingestion and review</div>
           <div className="hero-subtitle">
-            Public invoice pages, Stripe Checkout, webhooks, and cloud sync for the desktop app.
+            Dark-theme intake dashboard for email, uploads, parsing, and approval workflow.
           </div>
         </div>
       </section>
 
       <section className="grid two">
         <article className="card">
-          <div className="eyebrow">Ready for Vercel</div>
-          <div className="invoice-number">Next step: connect the hosted app root</div>
+          <div className="eyebrow">Workflow</div>
+          <div className="invoice-number">Ingestion first. Review fast.</div>
           <p className="copy">
-            This folder is the app Vercel should deploy. Once dependencies and environment variables are added,
-            customers will be able to open hosted invoice pages instead of the local desktop URL.
+            This app now centers the receipt review queue, upload flow, and approval actions. Job costing can layer on later without changing the intake path.
           </p>
           <div className="cta-row">
-            <Link className="btn primary" href="/invoice/demo-invoice">
-              Open demo invoice page
-            </Link>
-            <Link className="btn secondary" href="/receipts">
-              Open receipt library
-            </Link>
-            <Link className="btn secondary" href="/receipts/upload">
-              Open receipt upload
-            </Link>
+            <Link className="btn primary" href="/receipts">Open receipt inbox</Link>
+            <Link className="btn secondary" href="/receipts/upload">Upload a receipt</Link>
           </div>
         </article>
 
         <aside className="card muted">
-          <div className="eyebrow">Environment checklist</div>
+          <div className="eyebrow">Backends</div>
           <div className="details">
-            <div>1. Set Vercel Root Directory to <code>hosted-payments</code>.</div>
-            <div>2. Add Supabase URL and keys.</div>
-            <div>3. Add Stripe secret and webhook secret.</div>
-            <div>4. Add PayPal client, secret, and webhook id.</div>
-            <div>5. Apply <code>supabase/schema.sql</code> in Supabase.</div>
-            <div>6. Open <code>/receipts/upload</code> from a phone to start building the receipt bucket.</div>
+            <div>1. Apply <code>supabase/schema.sql</code> so receipt review tables exist.</div>
+            <div>2. Deploy <code>supabase/functions/parse-receipt-email</code> for email intake.</div>
+            <div>3. Run <code>services/pdf-extractor</code> and set <code>PDF_SERVICE_URL</code>.</div>
+            <div>4. Set the hosted app Supabase keys and optional edge function URL.</div>
           </div>
         </aside>
       </section>

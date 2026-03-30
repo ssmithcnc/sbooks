@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { updateReceiptUpload } from "@/lib/receipts";
+import { updateReceipt } from "@/lib/receipts";
 
 export const runtime = "nodejs";
 
@@ -12,13 +12,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "Receipt id is required." }, { status: 400 });
     }
 
-    const updated = await updateReceiptUpload(String(body.receiptId), {
-      vendorName: String(body.vendorName || ""),
-      category: String(body.category || ""),
+    const updated = await updateReceipt(String(body.receiptId), {
+      vendor: String(body.vendor || ""),
       receiptDate: String(body.receiptDate || ""),
-      totalAmount: String(body.totalAmount || ""),
-      notes: String(body.notes || ""),
-      contactEmail: String(body.contactEmail || ""),
+      orderNumber: String(body.orderNumber || ""),
+      total: String(body.total || ""),
+      tax: String(body.tax || ""),
+      status: body.status,
+      items: Array.isArray(body.items) ? body.items : [],
     });
 
     return NextResponse.json({ ok: true, receipt: updated });
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
         ok: false,
         error: error instanceof Error ? error.message : "Could not update receipt.",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

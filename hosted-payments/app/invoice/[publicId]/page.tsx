@@ -4,6 +4,9 @@ import { notFound } from "next/navigation";
 import { PayPalButtons } from "@/components/paypal-buttons";
 import { getInvoiceByPublicId } from "@/lib/invoices";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type PageProps = {
   params: Promise<{ publicId: string }>;
   searchParams?: Promise<{ paid?: string; canceled?: string; error?: string; provider?: string }>;

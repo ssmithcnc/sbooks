@@ -1,14 +1,23 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { ReceiptDeleteButton } from "@/components/receipt-delete-button";
-import { ReceiptEditForm } from "@/components/receipt-edit-form";
-import { getReceiptUploadById } from "@/lib/receipts";
+import { ReceiptReviewForm } from "@/components/receipt-review-form";
+import { getReceiptById } from "@/lib/receipts";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function ReceiptEditPage({
+function formatDate(value: string | null) {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+export default async function ReceiptReviewPage({
   params,
 }: {
   params: Promise<{ receiptId: string }>;
@@ -17,69 +26,73 @@ export default async function ReceiptEditPage({
 
   let receipt;
   try {
-    receipt = await getReceiptUploadById(receiptId);
+    receipt = await getReceiptById(receiptId);
   } catch {
     notFound();
   }
 
   return (
-    <main className="shell shell-narrow">
+    <main className="shell shell-wide">
       <section className="hero">
-        <div className="brand-mark" aria-hidden="true">
-          <div className="brand-mark-text">
-            <strong>S</strong>
-            <span>books</span>
-          </div>
-        </div>
         <div>
-          <div className="hero-title">Edit receipt record</div>
-          <div className="hero-subtitle">
-            Fix vendor, category, date, amount, notes, and contact details from one admin form.
-          </div>
+          <div className="eyebrow">Review</div>
+          <div className="hero-title">{receipt.vendor || "Receipt review"}</div>
+          <div className="hero-subtitle">Source preview on the left, editable receipt data on the right.</div>
         </div>
       </section>
 
-      <section className="grid two receipt-grid">
-        <article className="card muted">
-          <div className="eyebrow">Preview</div>
-          <div className="receipt-title">{receipt.vendor_name || "Unlabeled receipt"}</div>
-          <div className="details">
-            <div>Uploaded: {receipt.created_at}</div>
-            <div>Status: {receipt.status}</div>
-            <div>File: {receipt.original_name}</div>
-            <div>Path: {receipt.object_path}</div>
+      <section className="review-layout">
+        <article className="card review-preview">
+          <div className="section-header">
+            <div>
+              <div className="eyebrow">Source file</div>
+              <div className="section-title">{receipt.primary_file?.original_name || "Uploaded receipt"}</div>
+            </div>
+            <div className="cta-row">
+              <Link className="btn secondary" href="/receipts">Back to inbox</Link>
+              {receipt.primary_file?.signed_url ? (
+                <a className="btn primary" href={receipt.primary_file.signed_url} rel="noopener" target="_blank">
+                  Open full file
+                </a>
+              ) : null}
+            </div>
           </div>
-          <div className="receipt-edit-preview">
-            {receipt.signed_url && receipt.is_image ? (
-              <img className="receipt-edit-image" src={receipt.signed_url} alt={receipt.original_name} />
+
+          <div className="receipt-meta-grid">
+            <div><span>Uploaded</span><strong>{formatDate(receipt.created_at)}</strong></div>
+            <div><span>Status</span><strong>{receipt.status.replace("_", " ")}</strong></div>
+            <div><span>Confidence</span><strong>{Math.round((receipt.confidence || 0) * 100)}%</strong></div>
+            <div><span>Source</span><strong>{receipt.source}</strong></div>
+          </div>
+
+          <div className="document-frame">
+            {receipt.primary_file?.signed_url ? (
+              receipt.primary_file.is_pdf ? (
+                <iframe className="document-embed" src={receipt.primary_file.signed_url} title="Receipt PDF preview" />
+              ) : receipt.primary_file.is_image ? (
+                <img alt={receipt.primary_file.original_name || "Receipt"} className="document-image" src={receipt.primary_file.signed_url} />
+              ) : (
+                <div className="document-empty">Preview unavailable for this file type.</div>
+              )
             ) : (
-              <div className="receipt-edit-file">
-                <div className="receipt-file-pill">{receipt.is_pdf ? "PDF" : "FILE"}</div>
-                <div className="details">
-                  {receipt.is_pdf
-                    ? "PDF previews open in a new tab so you can verify the scanned document."
-                    : "This file type can still be opened even if there is no inline preview."}
-                </div>
-              </div>
+              <div className="document-empty">No uploaded file is attached to this receipt yet.</div>
             )}
           </div>
-          <div className="cta-row">
-            <Link className="btn secondary" href="/receipts">
-              Back to receipt admin
-            </Link>
-            {receipt.signed_url ? (
-              <a className="btn primary" href={receipt.signed_url} target="_blank" rel="noopener">
-                Open file
-              </a>
-            ) : null}
-            <ReceiptDeleteButton receiptId={receipt.id} />
+
+          <div className="raw-text-card">
+            <div className="eyebrow">Raw extraction text</div>
+            <pre>{receipt.raw_text || "No OCR or parsed text was saved for this receipt yet."}</pre>
           </div>
         </article>
 
-        <article className="card">
-          <div className="eyebrow">Record details</div>
-          <div className="receipt-title">Edit metadata</div>
-          <ReceiptEditForm receipt={receipt} />
+        <article className="card review-editor">
+          <div className="section-header">
+            <div>
+              <div className="eyebrow">Editable review</div>
+              <div className="section-title">Receipt fields and line items</div>
+            </div>
+          </div>
+          <ReceiptReviewForm receipt={receipt} />
         </article>
       </section>
     </main>

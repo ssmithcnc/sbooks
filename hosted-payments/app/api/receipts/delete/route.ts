@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { deleteReceiptUpload } from "@/lib/receipts";
+import { deleteReceipt } from "@/lib/receipts";
 
 export const runtime = "nodejs";
 
@@ -13,7 +13,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ ok: false, error: "Receipt id is required." }, { status: 400 });
     }
 
-    const deleted = await deleteReceiptUpload(receiptId);
+    const deleted = await deleteReceipt(receiptId);
     return NextResponse.json({ ok: true, deleted });
   } catch (error) {
     return NextResponse.json(
@@ -21,7 +21,7 @@ export async function DELETE(request: Request) {
         ok: false,
         error: error instanceof Error ? error.message : "Could not delete receipt.",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
