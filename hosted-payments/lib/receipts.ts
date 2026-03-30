@@ -93,6 +93,57 @@ function safeFileName(name: string | null | undefined) {
     .replace(/^-|-$/g, "") || "receipt";
 }
 
+function getPdfServiceUrl() {
+  const value = clean(process.env.PDF_SERVICE_URL);
+  if (!value) {
+    throw new Error("PDF_SERVICE_URL is not configured.");
+  }
+  return value;
+}
+
+async function trimPdfFile(file: ReceiptFileRecord, pagesToKeep: string) {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.storage.from(file.bucket_name || "receipts").download(file.file_path);
+  if (error) throw error;
+
+  const bytes = await data.arrayBuffer();
+  const response = await fetch(`${getPdfServiceUrl().replace(/\/$/, "")}/trim`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file: Buffer.from(bytes).toString("base64"),
+      pages: pagesToKeep,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`PDF trim failed: ${text || response.statusText}`);
+  }
+
+  const payload = await response.json();
+  const trimmedBase64 = clean(payload?.file);
+  if (!trimmedBase64) {
+    throw new Error("PDF trim service returned an empty file.");
+  }
+
+  const trimmedBuffer = Buffer.from(trimmedBase64, "base64");
+  const { error: uploadError } = await supabase.storage.from(file.bucket_name || "receipts").upload(file.file_path, trimmedBuffer, {
+    contentType: file.mime_type || "application/pdf",
+    upsert: true,
+  });
+  if (uploadError) throw uploadError;
+
+  const { error: fileUpdateError } = await (supabase.from("receipt_files") as any)
+    .update({
+      page_count: typeof payload?.page_count === "number" ? payload.page_count : null,
+      byte_size: typeof payload?.byte_size === "number" ? payload.byte_size : trimmedBuffer.byteLength,
+    })
+    .eq("id", file.id);
+
+  if (fileUpdateError) throw fileUpdateError;
+}
+
 async function withSignedUrls(files: Array<Omit<ReceiptFileRecord, "signed_url" | "is_pdf" | "is_image">>) {
   const supabase = getSupabaseAdmin();
   return Promise.all(
@@ -215,6 +266,17 @@ export async function getReceiptById(receiptId: string): Promise<ReceiptRecord> 
 
 export async function updateReceipt(receiptId: string, input: ReceiptUpdateInput) {
   const supabase = getSupabaseAdmin();
+  const existing = await getReceiptById(receiptId);
+  const nextPagesToKeep = clean(input.pagesToKeep);
+
+  if (
+    existing.primary_file?.is_pdf &&
+    nextPagesToKeep &&
+    nextPagesToKeep !== clean(existing.pages_to_keep)
+  ) {
+    await trimPdfFile(existing.primary_file, nextPagesToKeep);
+  }
+
   const { error: updateError } = await (supabase.from("receipts") as any)
     .update({
       vendor: clean(input.vendor) || null,
