@@ -41,7 +41,7 @@ function clean(value: string | null | undefined) {
   return String(value || "").trim();
 }
 
-function safeFileName(name: string) {
+function safeFileName(name: string | null | undefined) {
   return clean(name)
     .replace(/[^a-zA-Z0-9._-]+/g, "-")
     .replace(/-+/g, "-")
