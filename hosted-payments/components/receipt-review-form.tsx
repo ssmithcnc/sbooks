@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { RECEIPT_CATEGORIES } from "@/lib/receipt-categories";
 import type { ReceiptRecord } from "@/lib/receipts";
 
 type Props = {
@@ -27,6 +28,8 @@ export function ReceiptReviewForm({ receipt }: Props) {
   const [orderNumber, setOrderNumber] = useState(receipt.order_number || "");
   const [total, setTotal] = useState(toInput(receipt.total));
   const [tax, setTax] = useState(toInput(receipt.tax));
+  const [expenseCategory, setExpenseCategory] = useState(receipt.expense_category || "");
+  const [pagesToKeep, setPagesToKeep] = useState(receipt.pages_to_keep || "");
   const [reviewStatus, setReviewStatus] = useState<ReceiptRecord["status"]>(receipt.status);
   const [items, setItems] = useState<DraftItem[]>(
     receipt.items.length
@@ -58,6 +61,8 @@ export function ReceiptReviewForm({ receipt }: Props) {
           orderNumber,
           total,
           tax,
+          expenseCategory,
+          pagesToKeep,
           status: nextStatus || reviewStatus,
           items,
         }),
@@ -118,6 +123,30 @@ export function ReceiptReviewForm({ receipt }: Props) {
           <span>Tax</span>
           <input step="0.01" type="number" value={tax} onChange={(event) => setTax(event.target.value)} />
         </label>
+
+        <label className="field review-grid-span-2">
+          <span>Accounting expense category</span>
+          <select value={expenseCategory} onChange={(event) => setExpenseCategory(event.target.value)}>
+            <option value="">Select category</option>
+            {RECEIPT_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field review-grid-span-2">
+          <span>PDF pages to keep</span>
+          <input
+            placeholder={receipt.primary_file?.page_count ? `1-${receipt.primary_file.page_count}` : "1-2"}
+            value={pagesToKeep}
+            onChange={(event) => setPagesToKeep(event.target.value)}
+          />
+          <small className="field-help">
+            Save the useful pages only, like `1-2` or `1,3`. Current PDF pages detected: {receipt.primary_file?.page_count ?? "unknown"}.
+          </small>
+        </label>
       </div>
 
       <div className="line-items">
@@ -136,6 +165,13 @@ export function ReceiptReviewForm({ receipt }: Props) {
         </div>
 
         <div className="line-item-list">
+          <div className="line-item-header" aria-hidden="true">
+            <span>Description</span>
+            <span>Qty</span>
+            <span>Unit</span>
+            <span>Total</span>
+            <span>Action</span>
+          </div>
           {items.map((item, index) => (
             <div className="line-item-card" key={`${index}-${item.description}`}>
               <label className="field line-item-description">

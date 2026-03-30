@@ -7,6 +7,7 @@ export const RECEIPT_CATEGORIES = [
   "16000 - Transportation Equipment",
   "17000 - Accumulated Depreciation",
   "60000 - Accounting and Legal",
+  "60300 - Accounting Expense",
   "60100 - Advertising and Promotion",
   "60200 - Automobile Expense",
   "60400 - Bank Service Charges",

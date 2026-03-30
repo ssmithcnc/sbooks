@@ -114,6 +114,8 @@ create table if not exists receipts (
   order_number text,
   total numeric(12,2),
   tax numeric(12,2),
+  expense_category text,
+  pages_to_keep text,
   confidence numeric(5,4) not null default 0,
   source text not null default 'upload',
   raw_text text,
@@ -129,6 +131,8 @@ alter table receipts add column if not exists structured jsonb not null default 
 alter table receipts add column if not exists status text not null default 'needs_review';
 alter table receipts add column if not exists source text not null default 'upload';
 alter table receipts add column if not exists confidence numeric(5,4) not null default 0;
+alter table receipts add column if not exists expense_category text;
+alter table receipts add column if not exists pages_to_keep text;
 
 do $$
 begin

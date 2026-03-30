@@ -328,6 +328,7 @@ a {
 .field textarea,
 .field select {
   width: 100%;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 14px 16px;
@@ -797,6 +798,17 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+  align-items: start;
+}
+
+.review-grid-span-2 {
+  grid-column: 1 / -1;
+}
+
+.field-help {
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+  line-height: 1.45;
 }
 
 .line-items {
@@ -810,19 +822,38 @@ body {
   gap: 12px;
 }
 
+.line-item-header,
 .line-item-card {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 0.7fr)) auto;
-  gap: 12px;
+  grid-template-columns: minmax(200px, 2.2fr) repeat(3, minmax(72px, 0.72fr)) minmax(116px, auto);
+  gap: 10px;
+  align-items: end;
+}
+
+.line-item-header {
+  padding: 0 14px;
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.line-item-card {
   padding: 14px;
   border-radius: 20px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.03);
-  align-items: end;
 }
 
 .line-item-description {
   min-width: 0;
+}
+
+.line-item-card .btn {
+  width: 100%;
+  min-width: 0;
+  padding-left: 16px;
+  padding-right: 16px;
 }
 
 .sticky-actions {
@@ -899,9 +930,20 @@ body {
   .dashboard-grid,
   .review-layout,
   .filters-row,
-  .review-grid,
   .line-item-card {
     grid-template-columns: 1fr;
+  }
+
+  .review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-grid-span-2 {
+    grid-column: auto;
+  }
+
+  .line-item-header {
+    display: none;
   }
 
   .document-embed,

@@ -18,6 +18,8 @@ export async function POST(request: Request) {
       orderNumber: String(body.orderNumber || ""),
       total: String(body.total || ""),
       tax: String(body.tax || ""),
+      expenseCategory: String(body.expenseCategory || ""),
+      pagesToKeep: String(body.pagesToKeep || ""),
       status: body.status,
       items: Array.isArray(body.items) ? body.items : [],
     });

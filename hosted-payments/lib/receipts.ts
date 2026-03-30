@@ -38,6 +38,8 @@ type ReceiptRow = {
   order_number: string | null;
   total: number | null;
   tax: number | null;
+  expense_category: string | null;
+  pages_to_keep: string | null;
   confidence: number | null;
   source: string;
   raw_text: string | null;
@@ -59,6 +61,8 @@ type ReceiptUpdateInput = {
   orderNumber: string;
   total: string;
   tax: string;
+  expenseCategory: string;
+  pagesToKeep: string;
   status: ReceiptStatus;
   items: Array<{
     description: string;
@@ -111,7 +115,7 @@ async function withSignedUrls(files: Array<Omit<ReceiptFileRecord, "signed_url" 
 export async function listReceipts(filters: ReceiptListFilters = {}) {
   const supabase = getSupabaseAdmin();
   let query = (supabase.from("receipts") as any)
-    .select("id, vendor, receipt_date, order_number, total, tax, confidence, source, raw_text, structured, status, created_at, updated_at")
+    .select("id, vendor, receipt_date, order_number, total, tax, expense_category, pages_to_keep, confidence, source, raw_text, structured, status, created_at, updated_at")
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -168,7 +172,7 @@ export async function listReceipts(filters: ReceiptListFilters = {}) {
 export async function getReceiptById(receiptId: string): Promise<ReceiptRecord> {
   const supabase = getSupabaseAdmin();
   const { data: receipt, error } = await (supabase.from("receipts") as any)
-    .select("id, vendor, receipt_date, order_number, total, tax, confidence, source, raw_text, structured, status, created_at, updated_at")
+    .select("id, vendor, receipt_date, order_number, total, tax, expense_category, pages_to_keep, confidence, source, raw_text, structured, status, created_at, updated_at")
     .eq("id", receiptId)
     .single();
 
@@ -218,6 +222,8 @@ export async function updateReceipt(receiptId: string, input: ReceiptUpdateInput
       order_number: clean(input.orderNumber) || null,
       total: parseNumber(input.total),
       tax: parseNumber(input.tax),
+      expense_category: clean(input.expenseCategory) || null,
+      pages_to_keep: clean(input.pagesToKeep) || null,
       status: input.status,
       updated_at: new Date().toISOString(),
     })
@@ -316,6 +322,8 @@ export async function uploadReceiptFromForm(formData: FormData) {
       order_number: null,
       total: null,
       tax: null,
+      expense_category: null,
+      pages_to_keep: null,
       confidence: 0.2,
       source: "upload",
       raw_text: "",

@@ -63,6 +63,8 @@ export default async function ReceiptReviewPage({
             <div><span>Status</span><strong>{receipt.status.replace("_", " ")}</strong></div>
             <div><span>Confidence</span><strong>{Math.round((receipt.confidence || 0) * 100)}%</strong></div>
             <div><span>Source</span><strong>{receipt.source}</strong></div>
+            <div><span>Expense category</span><strong>{receipt.expense_category || "Not set"}</strong></div>
+            <div><span>Pages to keep</span><strong>{receipt.pages_to_keep || "Not set"}</strong></div>
           </div>
 
           <div className="document-frame">
