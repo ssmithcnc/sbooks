@@ -53,6 +53,21 @@ create table if not exists invoice_payment_options (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists invoice_line_items (
+  id uuid primary key default gen_random_uuid(),
+  invoice_id uuid not null references invoices(id) on delete cascade,
+  sort_order integer not null default 0,
+  description text not null,
+  quantity numeric(12,2) not null default 1,
+  unit_price numeric(12,2),
+  amount numeric(12,2),
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_invoice_line_items_invoice on invoice_line_items(invoice_id, sort_order, created_at);
+
 create table if not exists payment_sessions (
   id uuid primary key default gen_random_uuid(),
   invoice_id uuid not null references invoices(id) on delete cascade,
@@ -80,6 +95,20 @@ create table if not exists payment_events (
 );
 
 create index if not exists idx_payment_events_invoice on payment_events(invoice_id);
+
+create table if not exists invoice_email_deliveries (
+  id uuid primary key default gen_random_uuid(),
+  invoice_id uuid references invoices(id) on delete set null,
+  provider text not null default 'resend',
+  provider_message_id text,
+  recipient_email text not null,
+  subject text not null,
+  status text not null default 'queued',
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_invoice_email_deliveries_invoice on invoice_email_deliveries(invoice_id, created_at desc);
 
 create table if not exists receipt_uploads (
   id uuid primary key default gen_random_uuid(),

@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
           quantity: 1,
           price_data: {
             currency: (invoice.currency || "USD").toLowerCase(),
-            unit_amount: Math.round(Number(invoice.total || 0) * 100),
+            unit_amount: Math.round(Number(invoice.amount_due || invoice.total || 0) * 100),
             product_data: {
               name: `Invoice ${invoice.invoice_number}`,
               description: `S-Books payment for ${invoice.customer_name}`

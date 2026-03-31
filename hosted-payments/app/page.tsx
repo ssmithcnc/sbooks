@@ -36,6 +36,28 @@ export default function HomePage() {
           </div>
         </aside>
       </section>
+
+      <section className="grid two">
+        <article className="card">
+          <div className="eyebrow">Invoices</div>
+          <div className="invoice-number">Customer portal, PDF, CSV, pay link.</div>
+          <p className="copy">
+            The hosted invoice flow now supports branded customer-facing invoice pages, downloadable PDF and CSV exports, and direct online payment routing.
+          </p>
+          <div className="cta-row">
+            <Link className="btn primary" href="/invoice/demo-invoice">Open demo invoice</Link>
+          </div>
+        </article>
+
+        <aside className="card muted">
+          <div className="eyebrow">Email</div>
+          <div className="details">
+            <div>1. Set <code>RESEND_API_KEY</code> and <code>INVOICE_FROM_EMAIL</code>.</div>
+            <div>2. Set <code>INVOICE_ADMIN_TOKEN</code> for protected send actions.</div>
+            <div>3. Use <code>/invoice/[publicId]?manage=YOUR_TOKEN</code> to show the send-email control.</div>
+          </div>
+        </aside>
+      </section>
     </main>
   );
 }
