@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { PayPalButtons } from "@/components/paypal-buttons";
@@ -302,9 +301,6 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
         <div className="eyebrow">Customer portal</div>
         <div className="details">
           This invoice page now combines hosted payment buttons, PDF download, CSV export, and a shareable public invoice URL.
-        </div>
-        <div className="cta-row">
-          <Link className="btn secondary" href="/">Back to overview</Link>
         </div>
       </section>
     </main>
