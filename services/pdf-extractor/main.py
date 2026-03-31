@@ -104,7 +104,7 @@ def trim(file: dict):
         writer = PdfWriter()
 
         for page_index in page_indexes:
-          writer.add_page(reader.pages[page_index])
+            writer.add_page(reader.pages[page_index])
 
         output = BytesIO()
         writer.write(output)
