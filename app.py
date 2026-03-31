@@ -1430,9 +1430,25 @@ def publish_invoice_to_hosted_payments(conn, document: dict, settings: dict) -> 
     "metadata": {
       "source": "sbooks-desktop",
       "local_document_id": document["id"],
+      "customer_contact": document["customer"].get("contact_name") or "",
+      "billing_address": document["customer"].get("billing_address") or "",
       "terms": document.get("terms") or "",
       "notes": document.get("notes") or "",
       "payment_url": payment_page_url,
+      "line_items": [
+        {
+          "description": line.get("description") or "",
+          "quantity": round(float(line.get("quantity") or 0), 2),
+          "unit_price": round(float(line.get("unit_price") or 0), 2),
+          "amount": round(float(line.get("line_total") or 0), 2),
+          "product_id": line.get("product_id"),
+          "product_name": line.get("product_name"),
+          "product_sku": line.get("product_sku"),
+          "taxable": bool(line.get("taxable")),
+          "sort_order": int(line.get("sort_order") or 0),
+        }
+        for line in document.get("lines", [])
+      ],
     },
     "updated_at": now_iso(),
   }
@@ -1447,6 +1463,42 @@ def publish_invoice_to_hosted_payments(conn, document: dict, settings: dict) -> 
   invoice_record = first_record(invoice_response)
   if not invoice_record or not invoice_record.get("id"):
     raise RuntimeError("Supabase did not return an invoice id.")
+
+  supabase_rest_request(
+    settings,
+    "invoice_line_items",
+    method="DELETE",
+    query={"invoice_id": f"eq.{invoice_record['id']}"},
+  )
+
+  line_items_payload = [
+    {
+      "invoice_id": invoice_record["id"],
+      "sort_order": int(line.get("sort_order") or 0),
+      "description": line.get("description") or "",
+      "quantity": round(float(line.get("quantity") or 0), 2),
+      "unit_price": round(float(line.get("unit_price") or 0), 2),
+      "amount": round(float(line.get("line_total") or 0), 2),
+      "metadata": {
+        "product_id": line.get("product_id"),
+        "product_name": line.get("product_name"),
+        "product_sku": line.get("product_sku"),
+        "taxable": bool(line.get("taxable")),
+      },
+      "updated_at": now_iso(),
+    }
+    for line in document.get("lines", [])
+    if clean_text(line.get("description"))
+  ]
+
+  if line_items_payload:
+    supabase_rest_request(
+      settings,
+      "invoice_line_items",
+      method="POST",
+      payload=line_items_payload,
+      prefer=["return=representation"],
+    )
 
   payment_options_payload = {
     "invoice_id": invoice_record["id"],
