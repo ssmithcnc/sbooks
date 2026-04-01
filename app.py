@@ -467,6 +467,7 @@ def fetch_document(conn, document_id: int):
     "accept_stripe_ach": bool(doc_value("accept_stripe_ach", 1)),
     "accept_paypal": bool(doc_value("accept_paypal", 0)),
     "accept_venmo": bool(doc_value("accept_venmo", 0)),
+    "use_full_portal": bool(doc_value("use_full_portal", 0)),
     "last_sent_at": doc_value("last_sent_at"),
     "last_sent_to": doc_value("last_sent_to"),
     "last_email_error": doc_value("last_email_error"),
@@ -576,6 +577,7 @@ def build_document_payload(conn, payload: dict, existing: dict | None = None) ->
     "accept_stripe_ach": int(parse_bool(payload.get("accept_stripe_ach", (existing or {}).get("accept_stripe_ach", settings.get("default_accept_stripe_ach", "1"))), True)),
     "accept_paypal": int(parse_bool(payload.get("accept_paypal", (existing or {}).get("accept_paypal", settings.get("default_accept_paypal", "0"))), False)),
     "accept_venmo": int(parse_bool(payload.get("accept_venmo", (existing or {}).get("accept_venmo", settings.get("default_accept_venmo", "0"))), False)),
+    "use_full_portal": int(parse_bool(payload.get("use_full_portal", (existing or {}).get("use_full_portal", 0)), False)),
     "lines": lines,
   }
 
@@ -608,6 +610,7 @@ def save_document(conn, payload: dict, document_id: int | None = None) -> int:
     "accept_stripe_ach": doc["accept_stripe_ach"],
     "accept_paypal": doc["accept_paypal"],
     "accept_venmo": doc["accept_venmo"],
+    "use_full_portal": doc["use_full_portal"],
     "converted_from_document_id": doc["converted_from_document_id"],
   }
   persisted_values = {key: value for key, value in base_values.items() if key in available_columns}
@@ -1435,6 +1438,7 @@ def publish_invoice_to_hosted_payments(conn, document: dict, settings: dict) -> 
       "terms": document.get("terms") or "",
       "notes": document.get("notes") or "",
       "payment_url": payment_page_url,
+      "use_full_portal": bool(document.get("use_full_portal")),
       "line_items": [
         {
           "description": line.get("description") or "",
@@ -2199,6 +2203,7 @@ def list_documents():
       "accept_stripe_ach": "1",
       "accept_paypal": "0",
       "accept_venmo": "0",
+      "use_full_portal": "0",
       "last_sent_at": "NULL",
       "last_sent_to": "NULL",
     }
@@ -2243,6 +2248,7 @@ def list_documents():
       "accept_stripe_ach": bool(row["accept_stripe_ach"]) if "accept_stripe_ach" in row.keys() else True,
       "accept_paypal": bool(row["accept_paypal"]) if "accept_paypal" in row.keys() else False,
       "accept_venmo": bool(row["accept_venmo"]) if "accept_venmo" in row.keys() else False,
+      "use_full_portal": bool(row["use_full_portal"]) if "use_full_portal" in row.keys() else False,
       "last_sent_at": row["last_sent_at"] if "last_sent_at" in row.keys() else None,
       "last_sent_to": row["last_sent_to"] if "last_sent_to" in row.keys() else None,
     })

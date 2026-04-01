@@ -303,6 +303,7 @@ function resetDocumentForm() {
     accept_stripe_ach: asCheckedValue(state.settings.default_accept_stripe_ach),
     accept_paypal: asCheckedValue(state.settings.default_accept_paypal),
     accept_venmo: asCheckedValue(state.settings.default_accept_venmo),
+    use_full_portal: false,
   });
   $("#documentPaymentSyncMeta").textContent = documentPaymentSyncMeta(null);
   renderDocumentLines([emptyLine()]);
@@ -502,6 +503,7 @@ async function editDocument(id) {
     accept_stripe_ach: document.accept_stripe_ach,
     accept_paypal: document.accept_paypal,
     accept_venmo: document.accept_venmo,
+    use_full_portal: document.use_full_portal,
   });
   $("#documentPaymentSyncMeta").textContent = documentPaymentSyncMeta(document);
   renderDocumentLines(document.lines || [emptyLine()]);

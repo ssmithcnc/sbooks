@@ -35,6 +35,13 @@ function formatDate(value: string | null) {
   }).format(new Date(`${value}T00:00:00`));
 }
 
+function metadataFlag(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return ["1", "true", "yes", "y", "on"].includes(normalized);
+}
+
 export default async function InvoicePage({ params, searchParams }: PageProps) {
   const { publicId } = await params;
   const resolvedSearch = searchParams ? await searchParams : {};
@@ -56,12 +63,7 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
     accept_paypal: false,
     accept_venmo: false,
   };
-  const showPortalExperience =
-    paymentOptions.accept_manual_ach &&
-    !paymentOptions.accept_stripe_card &&
-    !paymentOptions.accept_stripe_ach &&
-    !paymentOptions.accept_paypal &&
-    !paymentOptions.accept_venmo;
+  const showPortalExperience = metadataFlag(invoice.metadata?.use_full_portal);
 
   return (
     <main className="shell">

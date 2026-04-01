@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS documents (
   accept_stripe_ach INTEGER NOT NULL DEFAULT 1,
   accept_paypal INTEGER NOT NULL DEFAULT 0,
   accept_venmo INTEGER NOT NULL DEFAULT 0,
+  use_full_portal INTEGER NOT NULL DEFAULT 0,
   last_sent_at TEXT,
   last_sent_to TEXT,
   last_email_error TEXT,
@@ -389,6 +390,8 @@ def migrate_db(conn):
       conn.execute("ALTER TABLE documents ADD COLUMN accept_paypal INTEGER NOT NULL DEFAULT 0")
     if "accept_venmo" not in cols:
       conn.execute("ALTER TABLE documents ADD COLUMN accept_venmo INTEGER NOT NULL DEFAULT 0")
+    if "use_full_portal" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN use_full_portal INTEGER NOT NULL DEFAULT 0")
     if "last_sent_at" not in cols:
       conn.execute("ALTER TABLE documents ADD COLUMN last_sent_at TEXT")
     if "last_sent_to" not in cols:
