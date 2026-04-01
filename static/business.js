@@ -303,7 +303,7 @@ function resetDocumentForm() {
     accept_stripe_ach: asCheckedValue(state.settings.default_accept_stripe_ach),
     accept_paypal: asCheckedValue(state.settings.default_accept_paypal),
     accept_venmo: asCheckedValue(state.settings.default_accept_venmo),
-    use_full_portal: false,
+    use_full_portal: true,
   });
   $("#documentPaymentSyncMeta").textContent = documentPaymentSyncMeta(null);
   renderDocumentLines([emptyLine()]);
