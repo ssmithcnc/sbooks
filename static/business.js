@@ -3,6 +3,7 @@ const state = {
   customers: [],
   products: [],
   documents: [],
+  invoiceReport: null,
   documentFilter: "all",
   importPreview: null,
   emailDraft: null,
@@ -218,6 +219,58 @@ function renderDocuments() {
   `;
 }
 
+function defaultReportMonth() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function invoiceReportUrl(kind = "json") {
+  const month = $("#invoiceReportMonth")?.value || defaultReportMonth();
+  const query = `month=${encodeURIComponent(month)}`;
+  if (kind === "csv") return `/api/reports/invoices/csv?${query}`;
+  if (kind === "pdf") return `/api/reports/invoices/pdf?${query}`;
+  return `/api/reports/invoices?${query}`;
+}
+
+function renderInvoiceReport() {
+  const monthInput = $("#invoiceReportMonth");
+  if (monthInput && !monthInput.value) monthInput.value = defaultReportMonth();
+  $("#invoiceReportCsvBtn").href = invoiceReportUrl("csv");
+  $("#invoiceReportPdfBtn").href = invoiceReportUrl("pdf");
+
+  const report = state.invoiceReport;
+  if (!report) {
+    $("#invoiceReportSummary").innerHTML = "";
+    $("#invoiceReportTable").innerHTML = `<tbody><tr><td class="muted">Load a month to see invoice totals.</td></tr></tbody>`;
+    return;
+  }
+
+  $("#invoiceReportSummary").innerHTML = `
+    <div><span>Month</span><b>${escapeHtml(report.month_label)}</b></div>
+    <div><span>Invoices</span><b>${Number(report.invoice_count || 0)}</b></div>
+    <div><span>Pre-tax</span><b>${fmtMoney(report.summary?.subtotal || 0)}</b></div>
+    <div><span>Tax</span><b>${fmtMoney(report.summary?.tax_amount || 0)}</b></div>
+    <div><span>Total</span><b>${fmtMoney(report.summary?.total || 0)}</b></div>
+  `;
+
+  const rows = (report.invoices || []).map((item) => `
+    <tr>
+      <td>${escapeHtml(item.number)}</td>
+      <td>${escapeHtml(item.issue_date || "")}</td>
+      <td>${escapeHtml(item.due_date || "")}</td>
+      <td>${escapeHtml(item.customer_name || "")}</td>
+      <td>${escapeHtml(item.status || "")}</td>
+      <td>${fmtMoney(item.subtotal || 0)}</td>
+      <td>${fmtMoney(item.tax_amount || 0)}</td>
+      <td>${fmtMoney(item.total || 0)}</td>
+    </tr>
+  `).join("");
+
+  $("#invoiceReportTable").innerHTML = `
+    <thead><tr><th>Invoice</th><th>Issue</th><th>Due</th><th>Customer</th><th>Status</th><th>Pre-tax</th><th>Tax</th><th>Total</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="8" class="muted">No invoices found for ${escapeHtml(report.month_label)}.</td></tr>`}</tbody>
+  `;
+}
+
 function emptyLine() {
   return { product_id: "", description: "", quantity: 1, unit_price: 0, taxable: true };
 }
@@ -401,10 +454,18 @@ async function loadAll() {
   renderCustomers();
   renderProducts();
   renderDocuments();
+  renderInvoiceReport();
   resetDocumentForm();
   renderImportPreview();
   renderEmailComposer();
   setStatus(syncSummary.trim());
+}
+
+async function loadInvoiceReport() {
+  const response = await apiGet(invoiceReportUrl("json"));
+  state.invoiceReport = response.report || null;
+  renderInvoiceReport();
+  setStatus(`Invoice report loaded for ${state.invoiceReport?.month_label || ($("#invoiceReportMonth")?.value || defaultReportMonth())}.`);
 }
 
 function escapeHtml(s) {
@@ -576,6 +637,7 @@ function bindEvents() {
   $("#previewImportBtn").addEventListener("click", () => previewImport().catch(showError));
   $("#commitImportBtn").addEventListener("click", () => commitImport().catch(showError));
   $("#refreshBusinessBtn").addEventListener("click", () => loadAll().catch(showError));
+  $("#loadInvoiceReportBtn").addEventListener("click", () => loadInvoiceReport().catch(showError));
   $("#refreshEmailDraftBtn").addEventListener("click", () => refreshEmailDraft().catch(showError));
   $("#sendInvoiceEmailBtn").addEventListener("click", () => sendInvoiceEmail().catch(showError));
   $("#publishDocumentBtn").addEventListener("click", () => publishDocumentPayment().catch(showError));
@@ -592,6 +654,7 @@ function bindEvents() {
 
   document.addEventListener("input", (e) => {
     if (e.target.closest("#documentForm")) renderDocumentTotals();
+    if (e.target.id === "invoiceReportMonth") renderInvoiceReport();
     if (e.target.closest("#emailComposerForm")) {
       $("#emailPreview").innerHTML = $("#emailComposerForm [name='html']").value || "";
     }
@@ -701,5 +764,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindEvents();
   resetCustomerForm();
   resetProductForm();
-  loadAll().catch(showError);
+  loadAll()
+    .then(() => loadInvoiceReport())
+    .catch(showError);
 });

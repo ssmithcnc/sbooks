@@ -1262,6 +1262,126 @@ def render_document_pdf_bytes(document: dict, settings: dict) -> bytes:
   return render_document_pdf(document, settings)
 
 
+def month_bounds(month_value: str) -> tuple[date, date]:
+  text = clean_text(month_value)
+  try:
+    start = datetime.strptime(text, "%Y-%m").date().replace(day=1)
+  except Exception:
+    raise ValueError("Month must be in YYYY-MM format")
+  if start.month == 12:
+    end = start.replace(year=start.year + 1, month=1, day=1)
+  else:
+    end = start.replace(month=start.month + 1, day=1)
+  return start, end
+
+
+def build_invoice_report(conn, month_value: str) -> dict:
+  start, end = month_bounds(month_value)
+  rows = conn.execute(
+    """
+    SELECT d.id, d.number, d.issue_date, d.due_date, d.status,
+           d.subtotal, d.tax_amount, d.total,
+           c.name AS customer_name
+    FROM documents d
+    JOIN customers c ON c.id = d.customer_id
+    WHERE d.type='invoice'
+      AND d.issue_date >= ?
+      AND d.issue_date < ?
+    ORDER BY d.issue_date ASC, d.id ASC
+    """,
+    (start.isoformat(), end.isoformat()),
+  ).fetchall()
+
+  invoices = [
+    {
+      "id": int(row["id"]),
+      "number": row["number"],
+      "issue_date": row["issue_date"],
+      "due_date": row["due_date"],
+      "status": row["status"],
+      "customer_name": row["customer_name"],
+      "subtotal": round(float(row["subtotal"] or 0), 2),
+      "tax_amount": round(float(row["tax_amount"] or 0), 2),
+      "total": round(float(row["total"] or 0), 2),
+    }
+    for row in rows
+  ]
+
+  subtotal_total = round(sum(item["subtotal"] for item in invoices), 2)
+  tax_total = round(sum(item["tax_amount"] for item in invoices), 2)
+  invoice_total = round(sum(item["total"] for item in invoices), 2)
+
+  return {
+    "month": month_value,
+    "month_label": start.strftime("%B %Y"),
+    "range_start": start.isoformat(),
+    "range_end": (end - timedelta(days=1)).isoformat(),
+    "invoice_count": len(invoices),
+    "summary": {
+      "subtotal": subtotal_total,
+      "tax_amount": tax_total,
+      "total": invoice_total,
+    },
+    "invoices": invoices,
+  }
+
+
+def invoice_report_csv_bytes(report: dict) -> bytes:
+  out = io.StringIO()
+  writer = csv.writer(out)
+  writer.writerow(["Invoice report", report["month_label"]])
+  writer.writerow(["Invoice count", report["invoice_count"]])
+  writer.writerow(["Pre-tax subtotal", f"{report['summary']['subtotal']:.2f}"])
+  writer.writerow(["Tax total", f"{report['summary']['tax_amount']:.2f}"])
+  writer.writerow(["Invoice total", f"{report['summary']['total']:.2f}"])
+  writer.writerow([])
+  writer.writerow(["Invoice number", "Issue date", "Due date", "Customer", "Status", "Pre-tax amount", "Tax", "Invoice total"])
+  for item in report["invoices"]:
+    writer.writerow([
+      item["number"],
+      item["issue_date"],
+      item["due_date"] or "",
+      item["customer_name"],
+      item["status"],
+      f"{item['subtotal']:.2f}",
+      f"{item['tax_amount']:.2f}",
+      f"{item['total']:.2f}",
+    ])
+  return out.getvalue().encode("utf-8")
+
+
+def render_html_to_pdf_bytes(file_stem: str, html_doc: str) -> bytes:
+  browser = browser_pdf_executable()
+  if not browser:
+    raise RuntimeError("A local browser PDF engine was not found for report export.")
+  work_tmp_root = os.path.join(os.getcwd(), "data", "_pdf_cache")
+  os.makedirs(work_tmp_root, exist_ok=True)
+  token = uuid.uuid4().hex
+  safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", clean_text(file_stem) or "report")
+  html_path = os.path.join(work_tmp_root, f"{safe_stem}-{token}.html")
+  pdf_path = os.path.join(work_tmp_root, f"{safe_stem}-{token}.pdf")
+  with open(html_path, "w", encoding="utf-8") as f:
+    f.write(html_doc)
+  subprocess.run(
+    [
+      browser,
+      "--headless=new",
+      "--disable-gpu",
+      f"--user-data-dir={os.path.join(work_tmp_root, f'profile-{token}')}",
+      "--allow-file-access-from-files",
+      f"--print-to-pdf={pdf_path}",
+      "--no-pdf-header-footer",
+      Path(html_path).resolve().as_uri(),
+    ],
+    check=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    timeout=30,
+  )
+  with open(pdf_path, "rb") as f:
+    return f.read()
+
+
 def app_base_url() -> str:
   return request.url_root.rstrip("/")
 
@@ -2464,6 +2584,59 @@ def pdf_document(document_id: int):
       mimetype="application/pdf",
       as_attachment=True,
       download_name=f"{document['number']}.pdf"
+    )
+  except Exception as exc:
+    return json_error(str(exc))
+
+
+@app.get("/api/reports/invoices")
+def invoice_report():
+  month_value = request.args.get("month") or date.today().strftime("%Y-%m")
+  try:
+    with db() as conn:
+      report = build_invoice_report(conn, month_value)
+    return jsonify({"ok": True, "report": report})
+  except Exception as exc:
+    return json_error(str(exc))
+
+
+@app.get("/api/reports/invoices/csv")
+def invoice_report_csv():
+  month_value = request.args.get("month") or date.today().strftime("%Y-%m")
+  try:
+    with db() as conn:
+      report = build_invoice_report(conn, month_value)
+    payload = invoice_report_csv_bytes(report)
+    return send_file(
+      io.BytesIO(payload),
+      mimetype="text/csv",
+      as_attachment=True,
+      download_name=f"invoice-report-{report['month']}.csv",
+    )
+  except Exception as exc:
+    return json_error(str(exc))
+
+
+@app.get("/api/reports/invoices/pdf")
+def invoice_report_pdf():
+  month_value = request.args.get("month") or date.today().strftime("%Y-%m")
+  try:
+    with db() as conn:
+      report = build_invoice_report(conn, month_value)
+      settings = business_settings_dict(conn)
+    html_doc = render_template(
+      "invoice_report_print.html",
+      title=f"Invoice Report {report['month_label']}",
+      report=report,
+      business=settings,
+      logo_src="/api/business_logo",
+    )
+    payload = render_html_to_pdf_bytes(f"invoice-report-{report['month']}", html_doc)
+    return send_file(
+      io.BytesIO(payload),
+      mimetype="application/pdf",
+      as_attachment=True,
+      download_name=f"invoice-report-{report['month']}.pdf",
     )
   except Exception as exc:
     return json_error(str(exc))

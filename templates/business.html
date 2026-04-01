@@ -354,6 +354,29 @@
     <section class="panel">
       <div class="panel-row">
         <div>
+          <b>Invoice Reports</b>
+          <div class="muted">Pick a month to see invoice totals, pre-tax sales, and tax collected. Export the month as CSV or PDF.</div>
+        </div>
+      </div>
+      <div class="business-form business-form-3">
+        <label>Report month
+          <input type="month" id="invoiceReportMonth" />
+        </label>
+        <div class="form-actions" style="align-self:end;">
+          <button class="btn" type="button" id="loadInvoiceReportBtn">Load Report</button>
+          <a class="btn btn-secondary" id="invoiceReportCsvBtn" href="#" target="_blank" rel="noopener">Download CSV</a>
+          <a class="btn btn-secondary" id="invoiceReportPdfBtn" href="#" target="_blank" rel="noopener">Download PDF</a>
+        </div>
+      </div>
+      <div id="invoiceReportSummary" class="totals-strip"></div>
+      <div class="table-wrap">
+        <table class="biz-table" id="invoiceReportTable"></table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-row">
+        <div>
           <b>Documents</b>
           <div class="muted">Preview printable HTML, download PDFs, or convert estimates into invoices.</div>
         </div>
