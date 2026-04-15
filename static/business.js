@@ -7,6 +7,7 @@ const state = {
   documentFilter: "all",
   importPreview: null,
   emailDraft: null,
+  smsDraft: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -81,6 +82,15 @@ function setStatus(message) {
 
 function setEmailSendStatus(message, tone = "") {
   const el = $("#emailSendStatus");
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.remove("status-good", "status-bad");
+  if (tone === "good") el.classList.add("status-good");
+  if (tone === "bad") el.classList.add("status-bad");
+}
+
+function setSmsSendStatus(message, tone = "") {
+  const el = $("#smsSendStatus");
   if (!el) return;
   el.textContent = message || "";
   el.classList.remove("status-good", "status-bad");
@@ -400,6 +410,25 @@ function renderEmailComposer() {
   preview.innerHTML = draft.preview_html || draft.html || `<div class="muted">No preview available.</div>`;
 }
 
+function renderSmsComposer() {
+  const panel = $("#smsComposerPanel");
+  if (!panel) return;
+  if (!state.smsDraft) {
+    panel.classList.add("hidden");
+    setSmsSendStatus("");
+    return;
+  }
+  const { draft, document } = state.smsDraft;
+  panel.classList.remove("hidden");
+  setFormValues($("#smsComposerForm"), {
+    document_id: document.id,
+    to: draft.to || "",
+    kind: draft.kind || "invoice",
+    message: draft.message || "",
+  });
+  $("#smsComposerMeta").textContent = `Invoice ${document.number} for ${document.customer.name} | ${fmtMoney(document.total)}`;
+}
+
 function updateSmtpProviderHint() {
   const provider = $("#settingsForm [name='smtp_provider']")?.value || "custom";
   $("#smtpProviderHint").textContent = SMTP_PRESETS[provider]?.hint || SMTP_PRESETS.custom.hint;
@@ -458,6 +487,7 @@ async function loadAll() {
   resetDocumentForm();
   renderImportPreview();
   renderEmailComposer();
+  renderSmsComposer();
   setStatus(syncSummary.trim());
 }
 
@@ -587,6 +617,20 @@ async function loadEmailDraft(id) {
   window.scrollTo({ top: $("#emailComposerPanel").offsetTop - 80, behavior: "smooth" });
 }
 
+async function loadReminderDraft(id, tone) {
+  state.emailDraft = await apiGet(`/api/documents/${id}/reminder_draft?tone=${encodeURIComponent(tone)}`);
+  renderEmailComposer();
+  setEmailSendStatus("");
+  window.scrollTo({ top: $("#emailComposerPanel").offsetTop - 80, behavior: "smooth" });
+}
+
+async function loadSmsDraft(id, kind = "invoice") {
+  state.smsDraft = await apiGet(`/api/documents/${id}/sms_draft?kind=${encodeURIComponent(kind)}`);
+  renderSmsComposer();
+  setSmsSendStatus("");
+  window.scrollTo({ top: $("#smsComposerPanel").offsetTop - 80, behavior: "smooth" });
+}
+
 async function publishDocumentPayment() {
   const documentId = $("#documentForm [name='id']").value;
   if (!documentId) {
@@ -629,6 +673,21 @@ async function sendInvoiceEmail() {
   setEmailSendStatus(message, "good");
 }
 
+async function sendInvoiceSms() {
+  const form = $("#smsComposerForm");
+  const payload = formToObject(form);
+  const documentId = payload.document_id;
+  if (!documentId) {
+    alert("Load an invoice text draft first.");
+    return;
+  }
+  setSmsSendStatus("Sending invoice text...");
+  const response = await apiJson(`/api/documents/${documentId}/send_sms`, "POST", payload);
+  const message = response?.message || `Invoice text sent to ${payload.to}.`;
+  setStatus(message);
+  setSmsSendStatus(message, "good");
+}
+
 function bindEvents() {
   $("#settingsForm").addEventListener("submit", (e) => saveSettings(e).catch(showError));
   $("#customerForm").addEventListener("submit", (e) => saveCustomer(e).catch(showError));
@@ -639,7 +698,33 @@ function bindEvents() {
   $("#refreshBusinessBtn").addEventListener("click", () => loadAll().catch(showError));
   $("#loadInvoiceReportBtn").addEventListener("click", () => loadInvoiceReport().catch(showError));
   $("#refreshEmailDraftBtn").addEventListener("click", () => refreshEmailDraft().catch(showError));
+  $("#friendlyReminderBtn").addEventListener("click", () => {
+    const documentId = $("#emailComposerForm [name='document_id']").value || $("#documentForm [name='id']").value;
+    if (!documentId) return alert("Load an invoice first.");
+    loadReminderDraft(documentId, "friendly").catch(showError);
+  });
+  $("#seriousReminderBtn").addEventListener("click", () => {
+    const documentId = $("#emailComposerForm [name='document_id']").value || $("#documentForm [name='id']").value;
+    if (!documentId) return alert("Load an invoice first.");
+    loadReminderDraft(documentId, "serious").catch(showError);
+  });
   $("#sendInvoiceEmailBtn").addEventListener("click", () => sendInvoiceEmail().catch(showError));
+  $("#loadInvoiceSmsBtn").addEventListener("click", () => {
+    const documentId = $("#smsComposerForm [name='document_id']").value || $("#documentForm [name='id']").value;
+    if (!documentId) return alert("Load an invoice first.");
+    loadSmsDraft(documentId, "invoice").catch(showError);
+  });
+  $("#loadFriendlySmsBtn").addEventListener("click", () => {
+    const documentId = $("#smsComposerForm [name='document_id']").value || $("#documentForm [name='id']").value;
+    if (!documentId) return alert("Load an invoice first.");
+    loadSmsDraft(documentId, "friendly").catch(showError);
+  });
+  $("#loadSeriousSmsBtn").addEventListener("click", () => {
+    const documentId = $("#smsComposerForm [name='document_id']").value || $("#documentForm [name='id']").value;
+    if (!documentId) return alert("Load an invoice first.");
+    loadSmsDraft(documentId, "serious").catch(showError);
+  });
+  $("#sendInvoiceSmsBtn").addEventListener("click", () => sendInvoiceSms().catch(showError));
   $("#publishDocumentBtn").addEventListener("click", () => publishDocumentPayment().catch(showError));
   $("#smtpProviderSelect").addEventListener("change", (e) => {
     applySmtpPreset(e.target.value, true);
@@ -755,6 +840,9 @@ function showError(err) {
   const message = err && err.message ? err.message : String(err);
   if ($("#emailComposerPanel") && !$("#emailComposerPanel").classList.contains("hidden")) {
     setEmailSendStatus(message, "bad");
+  }
+  if ($("#smsComposerPanel") && !$("#smsComposerPanel").classList.contains("hidden")) {
+    setSmsSendStatus(message, "bad");
   }
   alert(message);
   setStatus("There was a problem. See alert for details.");

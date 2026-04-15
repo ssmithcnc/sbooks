@@ -64,6 +64,9 @@ BUSINESS_SETTINGS_DEFAULTS = {
   "smtp_password": "",
   "smtp_use_tls": "1",
   "smtp_from_name": "",
+  "twilio_account_sid": "",
+  "twilio_auth_token": "",
+  "twilio_from_number": "",
   "invoice_payment_url_base": "",
   "supabase_url": "",
   "supabase_publishable_key": "",
@@ -1841,6 +1844,195 @@ def build_invoice_email_draft(document: dict, settings: dict) -> dict:
   }
 
 
+def document_due_context(document: dict) -> dict:
+  today_value = date.today()
+  due_date_value = None
+  due_label = "Due date"
+  due_value = document.get("due_date") or "On receipt"
+  days_past_due = 0
+  if document.get("due_date"):
+    try:
+      due_date_value = parse_date(document["due_date"])
+      days_past_due = max((today_value - due_date_value).days, 0)
+    except Exception:
+      due_date_value = None
+  return {
+    "today": today_value,
+    "due_date": due_date_value,
+    "due_label": due_label,
+    "due_value": due_value,
+    "days_past_due": days_past_due,
+  }
+
+
+def build_invoice_reminder_draft(document: dict, settings: dict, tone: str = "friendly") -> dict:
+  payment_url = build_payment_url(document, settings)
+  recipient_name = document["customer"].get("contact_name") or document["customer"]["name"]
+  company_name = settings.get("company_name") or APP_TITLE
+  due = document_due_context(document)
+  amount_due = f"${document['total']:,.2f}"
+
+  if tone == "serious":
+    intro_text = (
+      f"Hi {recipient_name},\n\n"
+      f"Invoice {document['number']} for {amount_due} is now past due."
+    )
+    if due["due_date"]:
+      intro_text += f" The due date was {due['due_value']}."
+    closing_text = (
+      "Please submit payment as soon as possible, or reply with the expected payment date so we can update our records.\n\n"
+      f"If payment has already been made, please send confirmation.\n\n"
+      f"Regards,\n{company_name}"
+    )
+    subject = f"Past due notice: invoice {document['number']}"
+  else:
+    intro_text = (
+      f"Hi {recipient_name},\n\n"
+      f"Just a quick reminder that invoice {document['number']} for {amount_due} is past due."
+    )
+    if due["due_date"]:
+      intro_text += f" It was due on {due['due_value']}."
+    closing_text = (
+      "If payment has already been sent, thank you and please ignore this note. "
+      "If not, you can use the payment link below or reply if you need anything from me.\n\n"
+      f"Thanks,\n{company_name}"
+    )
+    subject = f"Friendly reminder: invoice {document['number']} is past due"
+
+  company_logo_path = company_logo_file(settings)
+  html_body = render_template(
+    "invoice_email.html",
+    title=subject,
+    document=document,
+    business=settings,
+    payment_url=payment_url,
+    intro_html=html.escape(intro_text).replace("\n", "<br>"),
+    closing_html=html.escape(closing_text).replace("\n", "<br>"),
+    due_line=f"Due date: {due['due_value']}",
+    due_label=due["due_label"],
+    due_value=due["due_value"],
+    logo_src="cid:company-logo" if company_logo_path else None,
+    sbooks_logo_src="cid:sbooks-logo",
+  )
+  preview_html = render_template(
+    "invoice_email.html",
+    title=subject,
+    document=document,
+    business=settings,
+    payment_url=payment_url,
+    intro_html=html.escape(intro_text).replace("\n", "<br>"),
+    closing_html=html.escape(closing_text).replace("\n", "<br>"),
+    due_line=f"Due date: {due['due_value']}",
+    due_label=due["due_label"],
+    due_value=due["due_value"],
+    logo_src=inline_logo_data_uri(settings.get("company_logo_path", "")),
+    sbooks_logo_src=sbooks_brand_data_uri(),
+  )
+  text_body = "\n".join([
+    intro_text,
+    "",
+    f"Amount due: {amount_due}",
+    f"Due date: {due['due_value']}",
+    f"Pay online: {payment_url}",
+    "",
+    closing_text,
+  ])
+  return {
+    "to": document["customer"].get("email") or "",
+    "subject": subject,
+    "html": html_body,
+    "preview_html": preview_html,
+    "text": text_body,
+    "payment_url": payment_url,
+    "inline_images": [
+      {"cid": "sbooks-logo", "path": str(SBOOKS_BRAND_ASSET)},
+      *([{"cid": "company-logo", "path": str(company_logo_path)}] if company_logo_path else []),
+    ],
+  }
+
+
+def build_invoice_sms_draft(document: dict, settings: dict, kind: str = "invoice") -> dict:
+  payment_url = build_payment_url(document, settings)
+  recipient_name = document["customer"].get("contact_name") or document["customer"]["name"]
+  company_name = settings.get("company_name") or APP_TITLE
+  amount_due = f"${document['total']:,.2f}"
+  due = document_due_context(document)
+
+  if kind == "serious":
+    message = (
+      f"{recipient_name}, invoice {document['number']} from {company_name} is now past due. "
+      f"Amount due: {amount_due}. "
+      f"Please pay as soon as possible or reply with payment timing. {payment_url}"
+    )
+  elif kind == "friendly":
+    message = (
+      f"{recipient_name}, friendly reminder that invoice {document['number']} from {company_name} for {amount_due} "
+      f"is past due. Pay here: {payment_url}"
+    )
+  else:
+    message = (
+      f"{recipient_name}, your invoice {document['number']} from {company_name} is ready. "
+      f"Amount due: {amount_due}. "
+      f"{'Due ' + str(due['due_value']) + '. ' if document.get('due_date') else ''}"
+      f"Pay here: {payment_url}"
+    )
+
+  return {
+    "to": document["customer"].get("phone") or "",
+    "message": message,
+    "payment_url": payment_url,
+    "kind": kind,
+  }
+
+
+def send_twilio_sms_message(settings: dict, to_phone: str, body: str):
+  account_sid = clean_text(settings.get("twilio_account_sid"))
+  auth_token = clean_text(settings.get("twilio_auth_token"))
+  from_number = clean_text(settings.get("twilio_from_number"))
+
+  if not account_sid or not auth_token or not from_number:
+    raise ValueError("Twilio account SID, auth token, and from number are required before sending invoice text messages")
+  if not clean_text(to_phone):
+    raise ValueError("Recipient phone number is required")
+  if not clean_text(body):
+    raise ValueError("SMS message body is required")
+
+  payload = urlencode({
+    "To": clean_text(to_phone),
+    "From": from_number,
+    "Body": clean_text(body),
+  }).encode("utf-8")
+
+  auth_value = base64.b64encode(f"{account_sid}:{auth_token}".encode("utf-8")).decode("ascii")
+  req = urlrequest.Request(
+    f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json",
+    data=payload,
+    method="POST",
+    headers={
+      "Authorization": f"Basic {auth_value}",
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+  )
+
+  try:
+    with urlrequest.urlopen(req, timeout=30) as resp:
+      raw = resp.read().decode("utf-8")
+      data = json.loads(raw)
+  except urlerror.HTTPError as exc:
+    detail = exc.read().decode("utf-8", errors="ignore")
+    try:
+      parsed = json.loads(detail)
+      message = parsed.get("message") or detail
+    except Exception:
+      message = detail or str(exc)
+    raise ValueError(f"Twilio SMS failed: {message}") from exc
+
+  sid = clean_text(data.get("sid"))
+  if not sid:
+    raise ValueError("Twilio SMS request did not return a message SID")
+  return data
+
+
 def send_invoice_email_message(settings: dict, to_email: str, subject: str, html_body: str, text_body: str, pdf_name: str, pdf_bytes: bytes, inline_images: list[dict] | None = None):
   smtp_host = clean_text(settings.get("smtp_host"))
   smtp_port = int(parse_float(settings.get("smtp_port"), 587))
@@ -2407,6 +2599,52 @@ def get_document_email_draft(document_id: int):
   return jsonify({"ok": True, "draft": draft, "document": document})
 
 
+@app.get("/api/documents/<int:document_id>/reminder_draft")
+def get_document_reminder_draft(document_id: int):
+  tone = clean_text(request.args.get("tone") or "friendly").lower()
+  if tone not in {"friendly", "serious"}:
+    return json_error("Reminder tone must be friendly or serious", 400)
+  with db() as conn:
+    document = fetch_document(conn, document_id)
+    if not document:
+      return json_error("Document not found", 404)
+    if document["type"] != "invoice":
+      return json_error("Only invoices can use reminder drafts", 400)
+    settings = business_settings_dict(conn)
+    if hosted_payments_are_configured(settings):
+      try:
+        publish_invoice_to_hosted_payments(conn, document, settings)
+      except Exception:
+        if not document.get("cloud_public_id"):
+          document["cloud_sync_status"] = "sync_failed"
+    ensure_document_payment_url(conn, document, settings, persist=False)
+    draft = build_invoice_reminder_draft(document, settings, tone=tone)
+  return jsonify({"ok": True, "draft": draft, "document": document, "tone": tone})
+
+
+@app.get("/api/documents/<int:document_id>/sms_draft")
+def get_document_sms_draft(document_id: int):
+  kind = clean_text(request.args.get("kind") or "invoice").lower()
+  if kind not in {"invoice", "friendly", "serious"}:
+    return json_error("SMS kind must be invoice, friendly, or serious", 400)
+  with db() as conn:
+    document = fetch_document(conn, document_id)
+    if not document:
+      return json_error("Document not found", 404)
+    if document["type"] != "invoice":
+      return json_error("Only invoices can be texted", 400)
+    settings = business_settings_dict(conn)
+    if hosted_payments_are_configured(settings):
+      try:
+        publish_invoice_to_hosted_payments(conn, document, settings)
+      except Exception:
+        if not document.get("cloud_public_id"):
+          document["cloud_sync_status"] = "sync_failed"
+    ensure_document_payment_url(conn, document, settings, persist=False)
+    draft = build_invoice_sms_draft(document, settings, kind=kind)
+  return jsonify({"ok": True, "draft": draft, "document": document, "kind": kind})
+
+
 @app.post("/api/documents/<int:document_id>/publish_payment")
 def publish_document_payment(document_id: int):
   try:
@@ -2480,6 +2718,32 @@ def send_document_email(document_id: int):
         )
     except Exception:
       pass
+    return json_error(str(exc))
+
+
+@app.post("/api/documents/<int:document_id>/send_sms")
+def send_document_sms(document_id: int):
+  payload = request.get_json(force=True) or {}
+  try:
+    with db() as conn:
+      document = fetch_document(conn, document_id)
+      if not document:
+        return json_error("Document not found", 404)
+      if document["type"] != "invoice":
+        return json_error("Only invoices can be texted", 400)
+      settings = business_settings_dict(conn)
+      if hosted_payments_are_configured(settings):
+        try:
+          publish_invoice_to_hosted_payments(conn, document, settings)
+        except Exception:
+          if not document.get("cloud_public_id"):
+            document["cloud_sync_status"] = "sync_failed"
+      ensure_document_payment_url(conn, document, settings, persist=False)
+      to_phone = clean_text(payload.get("to") or document["customer"].get("phone"))
+      message = clean_text(payload.get("message"))
+      send_twilio_sms_message(settings, to_phone, message)
+    return jsonify({"ok": True, "message": f"Invoice text sent to {to_phone}"})
+  except Exception as exc:
     return json_error(str(exc))
 
 

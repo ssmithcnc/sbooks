@@ -115,6 +115,15 @@
         <label>SMTP from name
           <input type="text" name="smtp_from_name" placeholder="S-Books Billing" />
         </label>
+        <label>Twilio account SID
+          <input type="password" name="twilio_account_sid" />
+        </label>
+        <label>Twilio auth token
+          <input type="password" name="twilio_auth_token" />
+        </label>
+        <label>Twilio from number
+          <input type="text" name="twilio_from_number" placeholder="+18305551234" />
+        </label>
         <label class="checkboxline">
           <input type="checkbox" name="smtp_use_tls" checked />
           <span>Use STARTTLS (turn off for implicit SSL on port 465)</span>
@@ -400,6 +409,8 @@
         <div class="form-actions">
           <a class="btn btn-secondary" id="emailPaymentLink" target="_blank" rel="noopener" href="#">Open Payment Page</a>
           <button class="btn btn-secondary" type="button" id="refreshEmailDraftBtn">Reload Draft</button>
+          <button class="btn btn-secondary" type="button" id="friendlyReminderBtn">Friendly Reminder</button>
+          <button class="btn btn-secondary" type="button" id="seriousReminderBtn">Serious Reminder</button>
           <button class="btn" type="button" id="sendInvoiceEmailBtn">Send Invoice Email</button>
         </div>
       </div>
@@ -424,6 +435,34 @@
       </div>
       <div id="emailSendStatus" class="muted" style="margin-top:10px;"></div>
       <div id="emailPreview" class="email-preview"></div>
+    </section>
+
+    <section class="panel hidden" id="smsComposerPanel">
+      <div class="panel-row">
+        <div>
+          <b>Invoice Text Message</b>
+          <div class="muted" id="smsComposerMeta">Load an invoice text draft, review the recipient phone, and send by SMS.</div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-secondary" type="button" id="loadInvoiceSmsBtn">Text Invoice</button>
+          <button class="btn btn-secondary" type="button" id="loadFriendlySmsBtn">Text Friendly Reminder</button>
+          <button class="btn btn-secondary" type="button" id="loadSeriousSmsBtn">Text Serious Reminder</button>
+          <button class="btn" type="button" id="sendInvoiceSmsBtn">Send Text</button>
+        </div>
+      </div>
+      <form id="smsComposerForm" class="business-form business-form-2">
+        <input type="hidden" name="document_id" />
+        <label>Send to phone
+          <input type="text" name="to" placeholder="+18305551234" />
+        </label>
+        <label>Message type
+          <input type="text" name="kind" readonly />
+        </label>
+        <label class="full">SMS message
+          <textarea name="message" rows="8"></textarea>
+        </label>
+      </form>
+      <div id="smsSendStatus" class="muted" style="margin-top:10px;"></div>
     </section>
   </main>
 
