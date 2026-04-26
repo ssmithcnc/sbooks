@@ -1125,7 +1125,30 @@ body {
 }
 
 .paypal-headline {
-  cursor: default;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.paypal-toggle {
+  border: 1px solid var(--line);
+}
+
+.paypal-toggle:hover,
+.paypal-toggle:focus-visible,
+.paypal-toggle.expanded {
+  transform: translateY(-1px);
+  border-color: rgba(44, 104, 201, 0.42);
+  box-shadow: 0 14px 28px rgba(18, 35, 63, 0.12);
+  outline: 0;
+}
+
+.paypal-toggle.expanded .payment-method-chevron {
+  transform: rotate(90deg);
+}
+
+.paypal-toggle .payment-method-chevron {
+  transition: transform 160ms ease;
 }
 
 .paypal-venmo-icon {
@@ -1147,6 +1170,10 @@ body {
 
 .paypal-buttons-slot {
   min-height: 46px;
+}
+
+.paypal-panel {
+  padding: 2px 0 0 0;
 }
 
 .payment-support-block {

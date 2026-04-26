@@ -65,12 +65,19 @@ export function PayPalButtons({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string>("");
   const [ready, setReady] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const url = useMemo(() => sdkUrl(clientId, currency, showVenmo), [clientId, currency, showVenmo]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function mountButtons() {
+      if (!expanded) {
+        setError("");
+        setReady(false);
+        return;
+      }
+
       setError("");
       setReady(false);
 
@@ -140,11 +147,16 @@ export function PayPalButtons({
     return () => {
       cancelled = true;
     };
-  }, [publicId, url]);
+  }, [expanded, publicId, url]);
 
   return (
     <div className="paypal-block">
-      <div className="paypal-headline">
+      <button
+        className={`paypal-headline paypal-toggle${expanded ? " expanded" : ""}`}
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+      >
         <span className="payment-method-chevron" aria-hidden="true">{">"}</span>
         <div className="payment-method-copy">
           <div className="payment-method-title">{methodLabel}</div>
@@ -158,10 +170,14 @@ export function PayPalButtons({
             </span>
           ) : null}
         </div>
-      </div>
-      <div ref={containerRef} className="paypal-buttons-slot" />
-      {!ready && !error ? <div className="paypal-helper">Loading PayPal checkout options...</div> : null}
-      {error ? <div className="paypal-error">{error}</div> : null}
+      </button>
+      {expanded ? (
+        <div className="paypal-panel">
+          <div ref={containerRef} className="paypal-buttons-slot" />
+          {!ready && !error ? <div className="paypal-helper">Loading PayPal checkout options...</div> : null}
+          {error ? <div className="paypal-error">{error}</div> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
