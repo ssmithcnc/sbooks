@@ -64,12 +64,21 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
     accept_venmo: false,
   };
   const showPortalExperience = metadataFlag(invoice.metadata?.use_full_portal);
+  const hasWalletCheckout = Boolean((paymentOptions.accept_paypal || paymentOptions.accept_venmo) && paypalClientId);
+  const walletMethodLabel =
+    paymentOptions.accept_paypal && paymentOptions.accept_venmo
+      ? "PayPal or Venmo"
+      : paymentOptions.accept_venmo
+        ? "Venmo"
+        : "PayPal";
+  const hasOnlinePaymentMethods =
+    paymentOptions.accept_stripe_card || paymentOptions.accept_stripe_ach || hasWalletCheckout;
 
   return (
     <main className="shell">
       {resolvedSearch?.paid ? (
-        <section className="card" style={{ marginBottom: 18, borderColor: "#b8e0c6", background: "rgba(11, 49, 34, 0.92)" }}>
-          <div className="eyebrow" style={{ color: "#74efb8" }}>Payment received</div>
+        <section className="card" style={{ marginBottom: 18, borderColor: "#b8e0c6", background: "#f2fbf7" }}>
+          <div className="eyebrow" style={{ color: "#0e8d63" }}>Payment received</div>
           <div className="details">
             {resolvedSearch?.provider === "paypal"
               ? "PayPal returned this payment as successful. S-Books will reflect the webhook update after PayPal posts it."
@@ -78,26 +87,26 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
         </section>
       ) : null}
       {resolvedSearch?.canceled ? (
-        <section className="card" style={{ marginBottom: 18, borderColor: "#f1d19a", background: "rgba(57, 39, 10, 0.92)" }}>
-          <div className="eyebrow" style={{ color: "#ffcf70" }}>Checkout canceled</div>
+        <section className="card" style={{ marginBottom: 18, borderColor: "#f1d19a", background: "#fff8ed" }}>
+          <div className="eyebrow" style={{ color: "#a16207" }}>Checkout canceled</div>
           <div className="details">No payment was submitted. You can try again whenever you are ready.</div>
         </section>
       ) : null}
       {resolvedSearch?.error ? (
-        <section className="card" style={{ marginBottom: 18, borderColor: "#efb7b7", background: "rgba(61, 20, 20, 0.92)" }}>
-          <div className="eyebrow" style={{ color: "#ff9c9c" }}>Checkout error</div>
+        <section className="card" style={{ marginBottom: 18, borderColor: "#efb7b7", background: "#fff4f4" }}>
+          <div className="eyebrow" style={{ color: "#b42318" }}>Checkout error</div>
           <div className="details">{resolvedSearch.error}</div>
         </section>
       ) : null}
       {resolvedSearch?.emailed ? (
-        <section className="card" style={{ marginBottom: 18, borderColor: "#9ecaff", background: "rgba(14, 31, 56, 0.92)" }}>
-          <div className="eyebrow" style={{ color: "#9ecaff" }}>Invoice email sent</div>
+        <section className="card" style={{ marginBottom: 18, borderColor: "#9ecaff", background: "#eef6ff" }}>
+          <div className="eyebrow" style={{ color: "#15428e" }}>Invoice email sent</div>
           <div className="details">The branded invoice email was queued successfully.</div>
         </section>
       ) : null}
       {resolvedSearch?.emailError ? (
-        <section className="card" style={{ marginBottom: 18, borderColor: "#efb7b7", background: "rgba(61, 20, 20, 0.92)" }}>
-          <div className="eyebrow" style={{ color: "#ff9c9c" }}>Invoice email failed</div>
+        <section className="card" style={{ marginBottom: 18, borderColor: "#efb7b7", background: "#fff4f4" }}>
+          <div className="eyebrow" style={{ color: "#b42318" }}>Invoice email failed</div>
           <div className="details">{resolvedSearch.emailError}</div>
         </section>
       ) : null}
@@ -174,7 +183,6 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
                   <a className="btn secondary" href={`/api/invoice/${publicId}/pdf`}>Download PDF</a>
                   <a className="btn secondary" href={`/api/invoice/${publicId}/csv`}>Download CSV</a>
                 </div>
-                <div className="footer-note">Use the hosted page for payment and the downloads for accounting import or records.</div>
               </div>
             </div>
           ) : (
@@ -245,77 +253,68 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
 
         <aside className="card muted">
           <div className="eyebrow">Pay this invoice</div>
-          <div className="section-title">{showPortalExperience ? "Choose the fastest payment path" : "Simple invoice payment"}</div>
-          {showPortalExperience ? (
-            <div className="option-list" style={{ marginTop: 14 }}>
-              <div className="option">
-                <div>
-                  <div className="option-label">Stripe cards</div>
-                  <div className="option-copy">Pay online with a standard card checkout flow.</div>
-                </div>
-                <div>{paymentOptions.accept_stripe_card ? <span className="pill">Enabled</span> : null}</div>
-              </div>
-              <div className="option">
-                <div>
-                  <div className="option-label">Stripe ACH debit</div>
-                  <div className="option-copy">Use online bank payment when ACH is enabled for the invoice.</div>
-                </div>
-                <div>{paymentOptions.accept_stripe_ach ? <span className="pill">Enabled</span> : null}</div>
-              </div>
-              <div className="option">
-                <div>
-                  <div className="option-label">PayPal / Venmo</div>
-                  <div className="option-copy">PayPal checkout with Venmo support where eligible.</div>
-                </div>
-                <div>{(paymentOptions.accept_paypal || paymentOptions.accept_venmo) ? <span className="pill">Enabled</span> : null}</div>
-              </div>
+          <div className="section-title">Payment options</div>
+
+          {hasOnlinePaymentMethods ? (
+            <div className="payment-method-stack">
+              {paymentOptions.accept_stripe_card ? (
+                <form className="payment-method-form" action="/api/stripe/create-checkout-session" method="post">
+                  <input type="hidden" name="publicId" value={publicId} />
+                  <input type="hidden" name="paymentMethod" value="card" />
+                  <button className="payment-method-button" type="submit">
+                    <span className="payment-method-chevron" aria-hidden="true">{">"}</span>
+                    <span className="payment-method-copy">
+                      <span className="payment-method-title">Credit Card</span>
+                    </span>
+                    <span className="payment-brand-cluster" aria-hidden="true">
+                      <span className="payment-brand-badge payment-brand-badge-card">VISA</span>
+                      <span className="payment-brand-badge payment-brand-badge-card">MC</span>
+                      <span className="payment-brand-badge payment-brand-badge-card">AMEX</span>
+                      <span className="payment-brand-badge payment-brand-badge-card">DISC</span>
+                    </span>
+                  </button>
+                </form>
+              ) : null}
+              {paymentOptions.accept_stripe_ach ? (
+                <form className="payment-method-form" action="/api/stripe/create-checkout-session" method="post">
+                  <input type="hidden" name="publicId" value={publicId} />
+                  <input type="hidden" name="paymentMethod" value="us_bank_account" />
+                  <button className="payment-method-button" type="submit">
+                    <span className="payment-method-chevron" aria-hidden="true">{">"}</span>
+                    <span className="payment-method-copy">
+                      <span className="payment-method-title">Bank Transfer (ACH)</span>
+                    </span>
+                    <span className="payment-brand-cluster" aria-hidden="true">
+                      <span className="payment-brand-badge payment-brand-badge-ach">ACH</span>
+                    </span>
+                  </button>
+                </form>
+              ) : null}
+              {hasWalletCheckout ? (
+                <PayPalButtons
+                  clientId={paypalClientId}
+                  publicId={publicId}
+                  currency={invoice.currency || "USD"}
+                  showVenmo={Boolean(paymentOptions.accept_venmo)}
+                  methodLabel={walletMethodLabel}
+                />
+              ) : null}
             </div>
           ) : (
-            <div className="details" style={{ marginTop: 14 }}>
-              Use the button below to pay this invoice. For records, keep the invoice PDF attached to the original email.
+            <div className="details">
+              Contact {invoice.business.company_name}
+              {invoice.business.company_email ? ` at ${invoice.business.company_email}` : ""} to arrange payment.
             </div>
           )}
 
-          <div className="cta-row">
-            {paymentOptions.accept_stripe_card ? (
-              <form action="/api/stripe/create-checkout-session" method="post">
-                <input type="hidden" name="publicId" value={publicId} />
-                <input type="hidden" name="paymentMethod" value="card" />
-                <button className="btn primary" type="submit">Pay with card</button>
-              </form>
-            ) : null}
-            {paymentOptions.accept_stripe_ach ? (
-              <form action="/api/stripe/create-checkout-session" method="post">
-                <input type="hidden" name="publicId" value={publicId} />
-                <input type="hidden" name="paymentMethod" value="us_bank_account" />
-                <button className="btn secondary" type="submit">Pay by ACH</button>
-              </form>
-            ) : null}
-            {(paymentOptions.accept_paypal || paymentOptions.accept_venmo) && paypalClientId ? (
-              <PayPalButtons
-                clientId={paypalClientId}
-                publicId={publicId}
-                currency={invoice.currency || "USD"}
-                showVenmo={Boolean(paymentOptions.accept_venmo)}
-                buttonLabel={
-                  paymentOptions.accept_paypal && paymentOptions.accept_venmo
-                    ? "Pay with PayPal or Venmo"
-                    : paymentOptions.accept_venmo
-                      ? "Pay with Venmo"
-                      : "Pay with PayPal"
-                }
-              />
-            ) : null}
-          </div>
-
           {paymentOptions.accept_manual_ach && invoice.manual_bank_instructions ? (
-            <div className="details">
-              <div className="option-label">Manual bank transfer instructions</div>
-              <div className="invoice-prewrap">{invoice.manual_bank_instructions}</div>
+            <div className="payment-support-block">
+              <div className="eyebrow">Manual bank transfer</div>
+              <div className="copy invoice-prewrap">{invoice.manual_bank_instructions}</div>
             </div>
           ) : null}
 
-          <div className="footer-note">
+          <div className="footer-note payment-contact">
             Questions? Contact {invoice.business.company_name}
             {invoice.business.company_email ? ` at ${invoice.business.company_email}` : ""}.
           </div>
@@ -332,15 +331,6 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
           ) : null}
         </aside>
       </section>
-
-      {showPortalExperience ? (
-        <section className="card" style={{ marginTop: 18 }}>
-          <div className="eyebrow">Customer portal</div>
-          <div className="details">
-            This invoice page now combines hosted payment buttons, PDF download, CSV export, and a shareable public invoice URL.
-          </div>
-        </section>
-      ) : null}
     </main>
   );
 }

@@ -18,7 +18,7 @@ type PayPalButtonsProps = {
   publicId: string;
   currency: string;
   showVenmo: boolean;
-  buttonLabel: string;
+  methodLabel: string;
 };
 
 const VENMO_ICON =
@@ -60,7 +60,7 @@ export function PayPalButtons({
   publicId,
   currency,
   showVenmo,
-  buttonLabel
+  methodLabel
 }: PayPalButtonsProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string>("");
@@ -83,7 +83,7 @@ export function PayPalButtons({
         const buttons = window.paypal.Buttons({
           style: {
             layout: "vertical",
-            shape: "pill",
+            shape: "rect",
             label: "paypal",
             tagline: false
           },
@@ -145,8 +145,19 @@ export function PayPalButtons({
   return (
     <div className="paypal-block">
       <div className="paypal-headline">
-        <img className="paypal-venmo-icon" src={VENMO_ICON} alt="Venmo" />
-        <div className="eyebrow paypal-label">{buttonLabel}</div>
+        <span className="payment-method-chevron" aria-hidden="true">{">"}</span>
+        <div className="payment-method-copy">
+          <div className="payment-method-title">{methodLabel}</div>
+        </div>
+        <div className="paypal-badge-lockup" aria-hidden="true">
+          <span className="payment-brand-badge payment-brand-badge-paypal">PayPal</span>
+          {showVenmo ? (
+            <span className="paypal-venmo-badge">
+              <img className="paypal-venmo-icon" src={VENMO_ICON} alt="" />
+              <span>Venmo</span>
+            </span>
+          ) : null}
+        </div>
       </div>
       <div ref={containerRef} className="paypal-buttons-slot" />
       {!ready && !error ? <div className="paypal-helper">Loading PayPal checkout options...</div> : null}

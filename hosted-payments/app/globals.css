@@ -634,75 +634,76 @@ a {
 }
 
 :root {
-  --bg: #07111f;
-  --surface: rgba(8, 18, 34, 0.88);
-  --surface-muted: rgba(14, 28, 48, 0.82);
-  --ink: #edf4ff;
-  --ink-soft: #8ea3bf;
-  --line: rgba(135, 167, 208, 0.18);
-  --navy: #081528;
-  --blue: #59a6ff;
-  --blue-strong: #2a6de0;
-  --success: #46d39b;
-  --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  --bg: #eef4fb;
+  --surface: #ffffff;
+  --surface-muted: #f6f8fc;
+  --ink: #17263c;
+  --ink-soft: #62738d;
+  --line: #d6deeb;
+  --navy: #18253d;
+  --blue: #2c68c9;
+  --blue-strong: #15428e;
+  --success: #0e8d63;
+  --shadow: 0 22px 48px rgba(18, 35, 63, 0.12);
 }
 
 body {
   background:
-    radial-gradient(circle at top left, rgba(63, 109, 194, 0.32), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(28, 208, 157, 0.12), transparent 24%),
-    linear-gradient(180deg, #091321 0%, #040913 100%);
+    radial-gradient(circle at top left, rgba(44, 104, 201, 0.12), transparent 34%),
+    linear-gradient(180deg, #f9fbfe 0%, var(--bg) 100%);
   color: var(--ink);
-  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }
 
 .card,
-.card.muted,
 .card.inset,
 .receipt-table-wrap,
 .receipt-edit-preview,
 .document-frame,
 .raw-text-card {
-  background: var(--surface);
+  background: #fff;
   border-color: var(--line);
-  backdrop-filter: blur(20px);
+}
+
+.card.muted {
+  background: linear-gradient(180deg, #ffffff 0%, #f4f8ff 100%);
 }
 
 .card.inset {
   padding: 18px;
   border-radius: 22px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  background: linear-gradient(180deg, #ffffff 0%, var(--surface-muted) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 .hero {
-  background:
-    linear-gradient(135deg, rgba(11, 25, 48, 0.98) 0%, rgba(21, 59, 122, 0.96) 55%, rgba(33, 118, 224, 0.8) 100%);
-  border: 1px solid rgba(136, 177, 232, 0.18);
+  background: linear-gradient(135deg, #174387 0%, #2c68c9 100%);
+  border: 1px solid rgba(26, 72, 145, 0.12);
 }
 
 .btn.secondary {
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(163, 191, 227, 0.18);
+  background: #fff;
+  border: 1px solid var(--line);
 }
 
 .field input,
 .field textarea,
 .field select {
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(147, 177, 214, 0.18);
+  background: #fff;
+  border-color: var(--line);
 }
 
 .field select option,
 .filters-row select option {
   color: var(--ink);
-  background: #0f1b2d;
+  background: #fff;
 }
 
 .receipt-table th {
-  background: rgba(8, 18, 34, 0.96);
-  color: #9bb2cc;
+  background: rgba(245, 249, 255, 0.98);
+  color: var(--ink-soft);
 }
 
 .receipt-table td {
@@ -710,18 +711,18 @@ body {
 }
 
 .pill {
-  background: rgba(89, 166, 255, 0.12);
-  color: #9ecaff;
+  background: rgba(44, 104, 201, 0.12);
+  color: #235dbb;
 }
 
 .pill.status-approved {
-  background: rgba(70, 211, 155, 0.14);
-  color: #78efbf;
+  background: rgba(14, 141, 99, 0.12);
+  color: var(--success);
 }
 
 .pill.status-flagged {
-  background: rgba(245, 101, 101, 0.16);
-  color: #ff9c9c;
+  background: rgba(180, 35, 24, 0.1);
+  color: #b42318;
 }
 
 .dashboard-grid {
@@ -750,17 +751,17 @@ body {
   text-align: left;
   padding: 24px;
   border-radius: 24px;
-  border: 1px dashed rgba(126, 171, 233, 0.45);
+  border: 1px dashed rgba(44, 104, 201, 0.35);
   background:
-    radial-gradient(circle at top right, rgba(89, 166, 255, 0.18), transparent 40%),
-    linear-gradient(180deg, rgba(12, 26, 49, 0.92), rgba(8, 18, 34, 0.98));
+    radial-gradient(circle at top right, rgba(44, 104, 201, 0.08), transparent 40%),
+    linear-gradient(180deg, #ffffff 0%, #f4f8ff 100%);
   color: var(--ink);
 }
 
 .dropzone.dragging {
   transform: translateY(-1px);
-  border-color: rgba(117, 202, 255, 0.8);
-  box-shadow: 0 0 0 1px rgba(117, 202, 255, 0.22), 0 18px 38px rgba(23, 83, 173, 0.28);
+  border-color: rgba(44, 104, 201, 0.62);
+  box-shadow: 0 0 0 1px rgba(44, 104, 201, 0.12), 0 18px 38px rgba(18, 35, 63, 0.12);
 }
 
 .dropzone strong {
@@ -848,7 +849,7 @@ body {
   padding: 14px;
   border-radius: 20px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background: linear-gradient(180deg, #ffffff 0%, var(--surface-muted) 100%);
 }
 
 .line-item-description {
@@ -867,9 +868,10 @@ body {
   bottom: 14px;
   padding: 14px;
   border-radius: 20px;
-  background: rgba(7, 17, 31, 0.9);
+  background: rgba(255, 255, 255, 0.96);
   border: 1px solid var(--line);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 34px rgba(18, 35, 63, 0.08);
 }
 
 .receipt-meta-grid {
@@ -883,7 +885,7 @@ body {
   padding: 14px;
   border-radius: 18px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background: linear-gradient(180deg, #ffffff 0%, var(--surface-muted) 100%);
   display: grid;
   gap: 6px;
 }
@@ -928,7 +930,7 @@ body {
   margin: 12px 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #c8d8ec;
+  color: var(--ink);
   font: 0.95rem/1.6 "Consolas", "SFMono-Regular", monospace;
 }
 
@@ -1011,11 +1013,152 @@ body {
   padding: 16px 14px;
   border-radius: 20px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background: linear-gradient(180deg, #ffffff 0%, var(--surface-muted) 100%);
 }
 
 .invoice-line-item-description {
   min-width: 0;
+}
+
+.payment-method-stack {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.payment-method-form {
+  margin: 0;
+}
+
+.payment-method-button,
+.paypal-headline {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 10px 24px rgba(18, 35, 63, 0.08);
+}
+
+.payment-method-button {
+  cursor: pointer;
+  text-align: left;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.payment-method-button:hover,
+.payment-method-button:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(44, 104, 201, 0.42);
+  box-shadow: 0 14px 28px rgba(18, 35, 63, 0.12);
+  outline: 0;
+}
+
+.payment-method-chevron {
+  color: var(--ink-soft);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.payment-method-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.payment-method-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.payment-brand-cluster,
+.paypal-badge-lockup {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.payment-brand-badge,
+.paypal-venmo-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 48px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.payment-brand-badge-card {
+  background: #f6f9ff;
+  color: #1b4c99;
+}
+
+.payment-brand-badge-ach {
+  background: #f3fbf8;
+  color: #0e8d63;
+}
+
+.payment-brand-badge-paypal {
+  background: #f2f8ff;
+  color: #003087;
+}
+
+.paypal-block {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.paypal-headline {
+  cursor: default;
+}
+
+.paypal-venmo-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+  box-shadow: none;
+}
+
+.paypal-venmo-badge {
+  background: #f5fbff;
+  color: #008cff;
+}
+
+.paypal-label {
+  color: var(--ink-soft);
+}
+
+.paypal-buttons-slot {
+  min-height: 46px;
+}
+
+.payment-support-block {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, var(--surface-muted) 100%);
+}
+
+.payment-contact {
+  margin-top: 18px;
 }
 
 .invoice-total-stack {
@@ -1068,6 +1211,17 @@ body {
   .invoice-summary-grid,
   .invoice-line-item-row {
     grid-template-columns: 1fr;
+  }
+
+  .payment-method-button,
+  .paypal-headline {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .payment-brand-cluster,
+  .paypal-badge-lockup {
+    grid-column: 2;
+    justify-content: flex-start;
   }
 
   .invoice-line-item-header {

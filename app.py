@@ -3183,6 +3183,146 @@ def delete_rule(rule_id: int):
     conn.execute("DELETE FROM recurring_rules WHERE id=?", (rule_id,))
   return jsonify({"ok": True})
 
+def recurring_rule_occurrences(rule, to_date: date, paychecks: List[dict]) -> List[dict]:
+  if not bool(rule["is_active"]):
+    return []
+
+  start = parse_date(rule["start_date"])
+  end = parse_date(rule["end_date"]) if rule["end_date"] else to_date
+  end = min(end, to_date)
+  if end < start:
+    return []
+
+  url = rule["url"] if ("url" in rule.keys()) else None
+  occurrences = []
+
+  if rule["cadence"] == "monthly":
+    dom = int(rule["day_of_month"] or 1)
+    occ = date(start.year, start.month, 1)
+    while occ <= end:
+      next_month = (occ.replace(day=28) + timedelta(days=4)).replace(day=1)
+      last_day = (next_month - timedelta(days=1)).day
+      day = min(dom, last_day)
+      eff = date(occ.year, occ.month, day)
+      if eff < start:
+        occ = next_month
+        continue
+      if eff > end:
+        break
+
+      due_day = int(rule["due_day"] or day)
+      bucket = rule["funding_bucket_override"] or bucket_from_due_day(due_day)
+      fp_id = assign_funding_paycheck_id(eff.year, eff.month, bucket, paychecks)
+      due_label = f"by the {due_day}th" if rule["by_day_of_month"] else f"{due_day}th"
+      occurrences.append({
+        "effective_date": eff,
+        "account_id": rule["account_id"],
+        "amount": float(rule["amount"]),
+        "description": rule["description"],
+        "url": url,
+        "due_day": due_day,
+        "due_label": due_label,
+        "funding_bucket": bucket,
+        "funding_paycheck_id": fp_id,
+      })
+      occ = next_month
+
+  elif rule["cadence"] == "biweekly":
+    d = start
+    while d <= end:
+      due_day = int(rule["due_day"] or d.day)
+      bucket = rule["funding_bucket_override"] or bucket_from_due_day(due_day)
+      fp_id = assign_funding_paycheck_id(d.year, d.month, bucket, paychecks)
+      occurrences.append({
+        "effective_date": d,
+        "account_id": rule["account_id"],
+        "amount": float(rule["amount"]),
+        "description": rule["description"],
+        "url": url,
+        "due_day": due_day,
+        "due_label": None,
+        "funding_bucket": bucket,
+        "funding_paycheck_id": fp_id,
+      })
+      d += timedelta(days=14)
+
+  else:
+    raise ValueError("Cadence not implemented in MVP")
+
+  return occurrences
+
+
+def insert_generated_transaction(conn, rule_id: int, occurrence: dict):
+  now = now_iso()
+  conn.execute(
+    """INSERT INTO transactions
+       (account_id, recurring_rule_id, effective_date, amount, description, url, due_day, due_label, funding_bucket, funding_paycheck_id, status, sort_key, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+    (
+      occurrence["account_id"],
+      rule_id,
+      iso(occurrence["effective_date"]),
+      occurrence["amount"],
+      occurrence["description"],
+      occurrence["url"],
+      occurrence["due_day"],
+      occurrence["due_label"],
+      occurrence["funding_bucket"],
+      occurrence["funding_paycheck_id"],
+      "planned",
+      0,
+      now,
+      now,
+    )
+  )
+
+
+def sync_future_rule_transactions(conn, rule, to_date: date, from_date: Optional[date] = None) -> dict:
+  cutoff = from_date or date.today()
+  existing = [dict(r) for r in conn.execute(
+    """SELECT id, effective_date, status
+       FROM transactions
+       WHERE recurring_rule_id=? AND effective_date>=?
+       ORDER BY effective_date, id""",
+    (rule["id"], iso(cutoff))
+  ).fetchall()]
+  existing_max = max((parse_date(r["effective_date"]) for r in existing), default=None)
+  sync_end = max(to_date, existing_max) if existing_max else to_date
+
+  paychecks = [dict(r) for r in conn.execute("SELECT id,date FROM paychecks ORDER BY date").fetchall()]
+  future_occurrences = [
+    occ for occ in recurring_rule_occurrences(rule, sync_end, paychecks)
+    if occ["effective_date"] >= cutoff
+  ]
+  protected_dates = {
+    r["effective_date"] for r in existing
+    if (r["status"] or "planned") != "planned"
+  }
+  planned_existing = [r for r in existing if (r["status"] or "planned") == "planned"]
+  if planned_existing:
+    conn.execute(
+      "DELETE FROM transactions WHERE recurring_rule_id=? AND effective_date>=? AND status='planned'",
+      (rule["id"], iso(cutoff))
+    )
+
+  created = 0
+  skipped = 0
+  for occ in future_occurrences:
+    eff_iso = iso(occ["effective_date"])
+    if eff_iso in protected_dates:
+      skipped += 1
+      continue
+    insert_generated_transaction(conn, rule["id"], occ)
+    created += 1
+
+  return {
+    "created": created,
+    "deleted": len(planned_existing),
+    "skipped": skipped,
+    "through": iso(sync_end),
+  }
+
+
 @app.post("/api/recurring_rules/<int:rule_id>/generate")
 def generate_from_rule(rule_id: int):
   p = request.get_json(force=True)
@@ -3192,66 +3332,35 @@ def generate_from_rule(rule_id: int):
     if not rule:
       return jsonify({"ok": False, "error": "Rule not found"}), 404
 
-    start = parse_date(rule["start_date"])
-    end = parse_date(rule["end_date"]) if rule["end_date"] else to_date
-    end = min(end, to_date)
-
     paychecks = [dict(r) for r in conn.execute("SELECT id,date FROM paychecks ORDER BY date").fetchall()]
-
     created = 0
-    if rule["cadence"] == "monthly":
-      dom = int(rule["day_of_month"] or 1)
-      occ = date(start.year, start.month, 1)
-      while occ <= end:
-        next_month = (occ.replace(day=28) + timedelta(days=4)).replace(day=1)
-        last_day = (next_month - timedelta(days=1)).day
-        day = min(dom, last_day)
-        eff = date(occ.year, occ.month, day)
-        if eff < start:
-          occ = next_month
-          continue
-        if eff > end:
-          break
-
-        due_day = int(rule["due_day"] or day)
-        bucket = rule["funding_bucket_override"] or bucket_from_due_day(due_day)
-        fp_id = assign_funding_paycheck_id(eff.year, eff.month, bucket, paychecks)
-        due_label = f"by the {due_day}th" if rule["by_day_of_month"] else f"{due_day}th"
-
-        conn.execute(
-          """INSERT INTO transactions
-             (account_id, recurring_rule_id, effective_date, amount, description, url, due_day, due_label, funding_bucket, funding_paycheck_id, status, sort_key, created_at, updated_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-          (
-            rule["account_id"], rule["id"], iso(eff), float(rule["amount"]), rule["description"], (rule["url"] if ("url" in rule.keys()) else None),
-            due_day, due_label, bucket, fp_id, "planned", 0, now_iso(), now_iso()
-          )
-        )
+    try:
+      for occ in recurring_rule_occurrences(rule, to_date, paychecks):
+        insert_generated_transaction(conn, rule["id"], occ)
         created += 1
-        occ = next_month
-
-    elif rule["cadence"] == "biweekly":
-      d = start
-      while d <= end:
-        due_day = int(rule["due_day"] or d.day)
-        bucket = rule["funding_bucket_override"] or bucket_from_due_day(due_day)
-        fp_id = assign_funding_paycheck_id(d.year, d.month, bucket, paychecks)
-
-        conn.execute(
-          """INSERT INTO transactions
-             (account_id, recurring_rule_id, effective_date, amount, description, url, due_day, due_label, funding_bucket, funding_paycheck_id, status, sort_key, created_at, updated_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-          (
-            rule["account_id"], rule["id"], iso(d), float(rule["amount"]), rule["description"], (rule["url"] if ("url" in rule.keys()) else None),
-            due_day, None, bucket, fp_id, "planned", 0, now_iso(), now_iso()
-          )
-        )
-        created += 1
-        d += timedelta(days=14)
-    else:
-      return jsonify({"ok": False, "error": "Cadence not implemented in MVP"}), 400
+    except ValueError as exc:
+      return jsonify({"ok": False, "error": str(exc)}), 400
 
   return jsonify({"ok": True, "created": created})
+
+
+@app.post("/api/recurring_rules/<int:rule_id>/update_future")
+def update_future_from_rule(rule_id: int):
+  p = request.get_json(force=True)
+  to_date = parse_date(p["to_date"])
+  from_date = parse_date(p["from_date"]) if p.get("from_date") else date.today()
+
+  with db() as conn:
+    rule = conn.execute("SELECT * FROM recurring_rules WHERE id=?", (rule_id,)).fetchone()
+    if not rule:
+      return jsonify({"ok": False, "error": "Rule not found"}), 404
+
+    try:
+      result = sync_future_rule_transactions(conn, rule, to_date, from_date=from_date)
+    except ValueError as exc:
+      return jsonify({"ok": False, "error": str(exc)}), 400
+
+  return jsonify({"ok": True, **result})
 
 @app.get("/api/transactions")
 def list_transactions():
@@ -3568,9 +3677,12 @@ def projection():
       end = parse_date(primary[i+1]["date"]) - timedelta(days=1) if i + 1 < len(primary) else (start + timedelta(days=13))
       if end < date_from or start > date_to:
         continue
-      if iso(start) in archived_starts:
-        continue
-      periods.append({"start_date": iso(start), "end_date": iso(end), "paycheck": p})
+      periods.append({
+        "start_date": iso(start),
+        "end_date": iso(end),
+        "paycheck": p,
+        "archived": iso(start) in archived_starts,
+      })
 
     count_by_month = {}
     for p in primary:
@@ -3655,7 +3767,8 @@ def projection():
           "days": days
         })
 
-      out_periods.append(period_out)
+      if not period.get("archived"):
+        out_periods.append(period_out)
 
   return jsonify({"settings": settings, "accounts": accounts, "periods": out_periods})
 

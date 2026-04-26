@@ -749,6 +749,8 @@ async function openRecurringRulesManager() {
 
 function openRuleForm(rule, accounts, anchor, defaultToDate) {
   const isEdit = !!rule;
+  const syncActionLabel = isEdit ? "Save + Update" : "Save + Generate";
+  const syncThroughLabel = isEdit ? "Update through" : "Generate through";
   const body = `
     <div class="form">
       <label>Account
@@ -792,7 +794,7 @@ function openRuleForm(rule, accounts, anchor, defaultToDate) {
           <option value="0" ${(isEdit?Number(rule.is_active||1):1)===0?"selected":""}>No</option>
         </select>
       </label>
-      <label>Generate through
+      <label>${syncThroughLabel}
         <input id="r_to" type="date" value="${defaultToDate}">
       </label>
     </div>
@@ -801,7 +803,7 @@ function openRuleForm(rule, accounts, anchor, defaultToDate) {
     <div style="display:flex; gap:8px; justify-content:flex-end; width:100%">
       ${isEdit?`<button class="btn btn-secondary" id="btnDeleteRule">Delete</button>`:""}
       <button class="btn btn-secondary" id="btnSaveRule">Save</button>
-      <button class="btn" id="btnSaveGenRule">Save + Generate</button>
+      <button class="btn" id="btnSaveGenRule">${syncActionLabel}</button>
     </div>
   `;
   openModal(isEdit?"Edit Recurring Rule":"New Recurring Rule", body, footer);
@@ -861,7 +863,10 @@ function openRuleForm(rule, accounts, anchor, defaultToDate) {
         ruleId = res.id;
       }
       if (doGenerate && ruleId) {
-        await apiPost(`/api/recurring_rules/${ruleId}/generate`, { to_date: f.to_date });
+        const syncEndpoint = isEdit
+          ? `/api/recurring_rules/${ruleId}/update_future`
+          : `/api/recurring_rules/${ruleId}/generate`;
+        await apiPost(syncEndpoint, { to_date: f.to_date });
       }
       closeModal();
       await refresh();
@@ -870,7 +875,7 @@ function openRuleForm(rule, accounts, anchor, defaultToDate) {
       alert(err && err.message ? err.message : String(err));
     } finally {
       btn.disabled = false;
-      btn.textContent = doGenerate ? "Save + Generate" : "Save";
+      btn.textContent = doGenerate ? syncActionLabel : "Save";
     }
   }
 
