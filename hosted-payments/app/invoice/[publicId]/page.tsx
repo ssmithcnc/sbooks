@@ -35,6 +35,10 @@ function formatDate(value: string | null) {
   }).format(new Date(`${value}T00:00:00`));
 }
 
+function cleanStatus(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 function metadataFlag(value: unknown) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
@@ -49,7 +53,12 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
 
   if (!invoice) notFound();
 
-  const money = formatMoney(Number(invoice.amount_due || 0), invoice.currency ?? "USD");
+  const amountDue = Number(invoice.amount_due || 0);
+  const invoiceIsPaid =
+    cleanStatus(invoice.payment_status) === "paid" ||
+    cleanStatus(invoice.status) === "paid" ||
+    amountDue <= 0;
+  const money = formatMoney(amountDue, invoice.currency ?? "USD");
   const subtotal = formatMoney(Number(invoice.subtotal || 0), invoice.currency ?? "USD");
   const tax = formatMoney(Number(invoice.tax_amount || 0), invoice.currency ?? "USD");
   const paid = formatMoney(Number(invoice.amount_paid || 0), invoice.currency ?? "USD");
@@ -252,67 +261,79 @@ export default async function InvoicePage({ params, searchParams }: PageProps) {
         </article>
 
         <aside className="card muted">
-          <div className="eyebrow">Pay this invoice</div>
-          <div className="section-title">Payment options</div>
-
-          {hasOnlinePaymentMethods ? (
-            <div className="payment-method-stack">
-              {paymentOptions.accept_stripe_card ? (
-                <form className="payment-method-form" action="/api/stripe/create-checkout-session" method="post">
-                  <input type="hidden" name="publicId" value={publicId} />
-                  <input type="hidden" name="paymentMethod" value="card" />
-                  <button className="payment-method-button" type="submit">
-                    <span className="payment-method-chevron" aria-hidden="true">{">"}</span>
-                    <span className="payment-method-copy">
-                      <span className="payment-method-title">Credit Card</span>
-                    </span>
-                    <span className="payment-brand-cluster" aria-hidden="true">
-                      <span className="payment-brand-badge payment-brand-badge-card">VISA</span>
-                      <span className="payment-brand-badge payment-brand-badge-card">MC</span>
-                      <span className="payment-brand-badge payment-brand-badge-card">AMEX</span>
-                      <span className="payment-brand-badge payment-brand-badge-card">DISC</span>
-                    </span>
-                  </button>
-                </form>
-              ) : null}
-              {paymentOptions.accept_stripe_ach ? (
-                <form className="payment-method-form" action="/api/stripe/create-checkout-session" method="post">
-                  <input type="hidden" name="publicId" value={publicId} />
-                  <input type="hidden" name="paymentMethod" value="us_bank_account" />
-                  <button className="payment-method-button" type="submit">
-                    <span className="payment-method-chevron" aria-hidden="true">{">"}</span>
-                    <span className="payment-method-copy">
-                      <span className="payment-method-title">Bank Transfer (ACH)</span>
-                    </span>
-                    <span className="payment-brand-cluster" aria-hidden="true">
-                      <span className="payment-brand-badge payment-brand-badge-ach">ACH</span>
-                    </span>
-                  </button>
-                </form>
-              ) : null}
-              {hasWalletCheckout ? (
-                <PayPalButtons
-                  clientId={paypalClientId}
-                  publicId={publicId}
-                  currency={invoice.currency || "USD"}
-                  showVenmo={Boolean(paymentOptions.accept_venmo)}
-                  methodLabel={walletMethodLabel}
-                />
-              ) : null}
-            </div>
+          {invoiceIsPaid ? (
+            <>
+              <div className="eyebrow">Payment received</div>
+              <div className="section-title">This invoice is settled</div>
+              <div className="details">
+                We have recorded the full payment for {invoice.invoice_number}. Keep this page for your records or download the PDF from the invoice details.
+              </div>
+            </>
           ) : (
-            <div className="details">
-              Contact {invoice.business.company_name}
-              {invoice.business.company_email ? ` at ${invoice.business.company_email}` : ""} to arrange payment.
-            </div>
-          )}
+            <>
+              <div className="eyebrow">Pay this invoice</div>
+              <div className="section-title">Payment options</div>
 
-          {paymentOptions.accept_manual_ach && invoice.manual_bank_instructions ? (
-            <div className="payment-support-block">
-              <div className="eyebrow">Manual bank transfer</div>
-              <div className="copy invoice-prewrap">{invoice.manual_bank_instructions}</div>
-            </div>
-          ) : null}
+              {hasOnlinePaymentMethods ? (
+                <div className="payment-method-stack">
+                  {paymentOptions.accept_stripe_card ? (
+                    <form className="payment-method-form" action="/api/stripe/create-checkout-session" method="post">
+                      <input type="hidden" name="publicId" value={publicId} />
+                      <input type="hidden" name="paymentMethod" value="card" />
+                      <button className="payment-method-button" type="submit">
+                        <span className="payment-method-chevron" aria-hidden="true">{">"}</span>
+                        <span className="payment-method-copy">
+                          <span className="payment-method-title">Credit Card</span>
+                        </span>
+                        <span className="payment-brand-cluster" aria-hidden="true">
+                          <span className="payment-brand-badge payment-brand-badge-card">VISA</span>
+                          <span className="payment-brand-badge payment-brand-badge-card">MC</span>
+                          <span className="payment-brand-badge payment-brand-badge-card">AMEX</span>
+                          <span className="payment-brand-badge payment-brand-badge-card">DISC</span>
+                        </span>
+                      </button>
+                    </form>
+                  ) : null}
+                  {paymentOptions.accept_stripe_ach ? (
+                    <form className="payment-method-form" action="/api/stripe/create-checkout-session" method="post">
+                      <input type="hidden" name="publicId" value={publicId} />
+                      <input type="hidden" name="paymentMethod" value="us_bank_account" />
+                      <button className="payment-method-button" type="submit">
+                        <span className="payment-method-chevron" aria-hidden="true">{">"}</span>
+                        <span className="payment-method-copy">
+                          <span className="payment-method-title">Bank Transfer (ACH)</span>
+                        </span>
+                        <span className="payment-brand-cluster" aria-hidden="true">
+                          <span className="payment-brand-badge payment-brand-badge-ach">ACH</span>
+                        </span>
+                      </button>
+                    </form>
+                  ) : null}
+                  {hasWalletCheckout ? (
+                    <PayPalButtons
+                      clientId={paypalClientId}
+                      publicId={publicId}
+                      currency={invoice.currency || "USD"}
+                      showVenmo={Boolean(paymentOptions.accept_venmo)}
+                      methodLabel={walletMethodLabel}
+                    />
+                  ) : null}
+                </div>
+              ) : (
+                <div className="details">
+                  Contact {invoice.business.company_name}
+                  {invoice.business.company_email ? ` at ${invoice.business.company_email}` : ""} to arrange payment.
+                </div>
+              )}
+
+              {paymentOptions.accept_manual_ach && invoice.manual_bank_instructions ? (
+                <div className="payment-support-block">
+                  <div className="eyebrow">Manual bank transfer</div>
+                  <div className="copy invoice-prewrap">{invoice.manual_bank_instructions}</div>
+                </div>
+              ) : null}
+            </>
+          )}
 
           <div className="footer-note payment-contact">
             Questions? Contact {invoice.business.company_name}
