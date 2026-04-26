@@ -216,13 +216,32 @@ async function insertPaymentEvent(record: PaymentEventInsert) {
 
 async function markInvoicePaid(invoiceId: string, latestCheckoutUrl: string | null = null) {
   const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("invoices")
+    .select("id, total, amount_paid, latest_checkout_url")
+    .eq("id", invoiceId)
+    .returns<Pick<InvoiceRecord, "id" | "total" | "amount_paid" | "latest_checkout_url"> | null>()
+    .maybeSingle();
+
+  const invoice = data as Pick<InvoiceRecord, "id" | "total" | "amount_paid" | "latest_checkout_url"> | null;
+  const amountPaid = invoice ? Math.max(toNumber(invoice.total) ?? 0, toNumber(invoice.amount_paid) ?? 0) : null;
+
+  const updates: Record<string, unknown> = {
+    payment_status: "paid",
+    status: "paid",
+    updated_at: new Date().toISOString(),
+  };
+
+  if (amountPaid !== null) {
+    updates.amount_paid = amountPaid;
+  }
+
+  if (latestCheckoutUrl || !clean(invoice?.latest_checkout_url)) {
+    updates.latest_checkout_url = latestCheckoutUrl;
+  }
+
   await (supabase.from("invoices") as any)
-    .update({
-      payment_status: "paid",
-      status: "paid",
-      latest_checkout_url: latestCheckoutUrl,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updates)
     .eq("id", invoiceId);
 }
 
