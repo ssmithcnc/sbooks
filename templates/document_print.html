@@ -338,6 +338,16 @@
       </div>
     </section>
 
+    {% if document.type == "estimate" and document.acceptance_url %}
+    <section class="detail-grid" style="margin-top:0;">
+      <div class="card" style="grid-column:1 / -1;">
+        <div class="card-title">Accept Online</div>
+        <div class="stack">Approve this quote online{% if document.acceptance_deposit %} and pay {{ document.acceptance_deposit.summary|lower }}{% endif %}.</div>
+        <div class="stack" style="margin-top:10px;"><a href="{{ document.acceptance_url }}">{{ document.acceptance_url }}</a>{% if document.accepted_at %}{{ "\nAccepted: " ~ document.accepted_at }}{% if document.accepted_by_name %}{{ " by " ~ document.accepted_by_name }}{% endif %}{% endif %}</div>
+      </div>
+    </section>
+    {% endif %}
+
     <table>
       <thead>
         <tr>

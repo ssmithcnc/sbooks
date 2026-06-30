@@ -23,7 +23,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from urllib.parse import quote, urlencode
 
-from flask import Flask, jsonify, request, render_template, send_file, send_from_directory
+from flask import Flask, jsonify, redirect, request, render_template, send_file, send_from_directory
 
 from db import init_db, db
 
@@ -67,6 +67,7 @@ BUSINESS_SETTINGS_DEFAULTS = {
   "twilio_account_sid": "",
   "twilio_auth_token": "",
   "twilio_from_number": "",
+  "public_app_base_url": "",
   "invoice_payment_url_base": "",
   "supabase_url": "",
   "supabase_publishable_key": "",
@@ -380,6 +381,117 @@ def calculate_document_totals(lines: list[dict], tax_rate: float) -> tuple[float
   return subtotal, tax_amount, total
 
 
+def format_currency(amount: float) -> str:
+  return f"${round(float(amount or 0), 2):,.2f}"
+
+
+def estimate_taxable_subtotal(document: dict) -> float:
+  taxable_subtotal = 0.0
+  for line in document.get("lines", []):
+    line_total = float(line.get("line_total") or 0)
+    if parse_bool(line.get("taxable"), True):
+      taxable_subtotal += line_total
+  return round(taxable_subtotal, 2)
+
+
+def _find_taxable_subtotal_for_total(target_total: float, starting_subtotal: float, tax_rate: float) -> float:
+  target_total = round(float(target_total or 0), 2)
+  starting_cents = max(int(round(float(starting_subtotal or 0) * 100)), 0)
+  for delta in range(0, 1001):
+    for sign in (1, -1):
+      candidate_cents = starting_cents + (delta * sign)
+      if candidate_cents < 0:
+        continue
+      candidate = candidate_cents / 100.0
+      candidate_total = round(candidate + round(candidate * (tax_rate / 100.0), 2), 2)
+      if candidate_total == target_total:
+        return round(candidate, 2)
+  fallback = round(target_total / (1 + (tax_rate / 100.0)), 2) if tax_rate else target_total
+  return max(fallback, 0.0)
+
+
+def estimate_deposit_breakdown(document: dict) -> dict | None:
+  if document.get("type") != "estimate":
+    return None
+
+  deposit_type = clean_text(document.get("acceptance_deposit_type")).lower()
+  if deposit_type not in {"percent", "fixed"}:
+    return None
+
+  configured_value = round(parse_float(document.get("acceptance_deposit_value"), 0.0), 2)
+  total = round(float(document.get("total") or 0), 2)
+  subtotal = round(float(document.get("subtotal") or 0), 2)
+  if configured_value <= 0 or total <= 0:
+    return None
+
+  if deposit_type == "percent":
+    percent = min(configured_value, 100.0)
+    target_total = round(total * (percent / 100.0), 2)
+    factor = percent / 100.0
+    label = f"{percent:g}% deposit"
+  else:
+    target_total = round(min(configured_value, total), 2)
+    factor = target_total / total if total else 0.0
+    percent = round((target_total / total) * 100.0, 2) if total else 0.0
+    label = f"{format_currency(target_total)} deposit"
+
+  tax_rate = round(parse_float(document.get("tax_rate"), 0.0), 2)
+  taxable_subtotal = estimate_taxable_subtotal(document)
+  nontaxable_subtotal = round(subtotal - taxable_subtotal, 2)
+  deposit_taxable_subtotal = round(taxable_subtotal * factor, 2)
+  deposit_nontaxable_subtotal = round(nontaxable_subtotal * factor, 2)
+  deposit_tax_amount = round(deposit_taxable_subtotal * (tax_rate / 100.0), 2)
+  current_total = round(deposit_taxable_subtotal + deposit_nontaxable_subtotal + deposit_tax_amount, 2)
+  difference = round(target_total - current_total, 2)
+
+  if abs(difference) >= 0.01:
+    if abs(deposit_nontaxable_subtotal) > 0 or abs(nontaxable_subtotal) > 0:
+      deposit_nontaxable_subtotal = round(deposit_nontaxable_subtotal + difference, 2)
+    elif abs(deposit_taxable_subtotal) > 0 or abs(taxable_subtotal) > 0:
+      deposit_taxable_subtotal = _find_taxable_subtotal_for_total(target_total, deposit_taxable_subtotal, tax_rate)
+    deposit_tax_amount = round(deposit_taxable_subtotal * (tax_rate / 100.0), 2)
+    current_total = round(deposit_taxable_subtotal + deposit_nontaxable_subtotal + deposit_tax_amount, 2)
+    difference = round(target_total - current_total, 2)
+    if abs(difference) >= 0.01:
+      deposit_nontaxable_subtotal = round(deposit_nontaxable_subtotal + difference, 2)
+      current_total = round(
+        deposit_taxable_subtotal + deposit_nontaxable_subtotal + round(deposit_taxable_subtotal * (tax_rate / 100.0), 2),
+        2,
+      )
+
+  lines = []
+  if deposit_taxable_subtotal > 0:
+    lines.append({
+      "description": f"{label} for Estimate {document['number']}",
+      "quantity": 1.0,
+      "unit_price": round(deposit_taxable_subtotal, 2),
+      "taxable": True,
+      "sort_order": 0,
+    })
+  if deposit_nontaxable_subtotal > 0:
+    lines.append({
+      "description": f"{label} for Estimate {document['number']} (non-taxable)",
+      "quantity": 1.0,
+      "unit_price": round(deposit_nontaxable_subtotal, 2),
+      "taxable": False,
+      "sort_order": len(lines),
+    })
+
+  return {
+    "type": deposit_type,
+    "configured_value": configured_value,
+    "percent": percent,
+    "factor": factor,
+    "label": label,
+    "summary": f"{label} due on acceptance",
+    "target_total": round(target_total, 2),
+    "subtotal": round(deposit_taxable_subtotal + deposit_nontaxable_subtotal, 2),
+    "tax_amount": round(deposit_tax_amount, 2),
+    "tax_rate": tax_rate,
+    "lines": lines,
+  }
+
+
 def serialize_customer(row) -> dict:
   return {
     "id": int(row["id"]),
@@ -471,6 +583,22 @@ def fetch_document(conn, document_id: int):
     "accept_paypal": bool(doc_value("accept_paypal", 0)),
     "accept_venmo": bool(doc_value("accept_venmo", 0)),
     "use_full_portal": bool(doc_value("use_full_portal", 1)),
+    "acceptance_enabled": bool(doc_value("acceptance_enabled", 0)),
+    "acceptance_token": doc_value("acceptance_token"),
+    "acceptance_deposit_type": clean_text(doc_value("acceptance_deposit_type")).lower() or None,
+    "acceptance_deposit_value": (
+      round(float(doc_value("acceptance_deposit_value") or 0), 2)
+      if doc_value("acceptance_deposit_value") not in (None, "")
+      else None
+    ),
+    "accepted_at": doc_value("accepted_at"),
+    "accepted_by_name": doc_value("accepted_by_name"),
+    "accepted_by_email": doc_value("accepted_by_email"),
+    "deposit_invoice_document_id": (
+      int(doc_value("deposit_invoice_document_id"))
+      if doc_value("deposit_invoice_document_id") not in (None, "")
+      else None
+    ),
     "last_sent_at": doc_value("last_sent_at"),
     "last_sent_to": doc_value("last_sent_to"),
     "last_email_error": doc_value("last_email_error"),
@@ -546,14 +674,46 @@ def build_document_payload(conn, payload: dict, existing: dict | None = None) ->
   tax_rate = parse_float(payload.get("tax_rate"), parse_float((existing or {}).get("tax_rate"), parse_float(settings.get("default_tax_rate", "0"))))
   subtotal, tax_amount, total = calculate_document_totals(lines, tax_rate)
   status = clean_text(payload.get("status") or (existing or {}).get("status") or ("draft" if doc_type == "estimate" else "draft"))
+  accepted_at = clean_text((existing or {}).get("accepted_at")) or None
   if doc_type == "estimate":
-    status = "draft"
+    status = "accepted" if accepted_at else "draft"
   elif status not in {"draft", "open", "paid"}:
     status = "draft"
 
   number = clean_text(payload.get("number") or (existing or {}).get("number"))
   if not number:
     number = next_document_number(conn, doc_type)
+
+  acceptance_enabled = int(parse_bool(payload.get("acceptance_enabled", (existing or {}).get("acceptance_enabled", False)), False))
+  acceptance_token = clean_text((existing or {}).get("acceptance_token")) or None
+  acceptance_deposit_type = clean_text(payload.get("acceptance_deposit_type", (existing or {}).get("acceptance_deposit_type"))).lower() or None
+  if acceptance_deposit_type not in {"percent", "fixed"}:
+    acceptance_deposit_type = None
+  acceptance_deposit_value = round(
+    parse_float(payload.get("acceptance_deposit_value", (existing or {}).get("acceptance_deposit_value")), 0.0),
+    2,
+  ) if acceptance_deposit_type else None
+
+  if doc_type != "estimate":
+    acceptance_enabled = 0
+    acceptance_token = None
+    acceptance_deposit_type = None
+    acceptance_deposit_value = None
+  else:
+    if accepted_at:
+      acceptance_enabled = 1
+    if acceptance_enabled:
+      acceptance_token = acceptance_token or uuid.uuid4().hex
+      if acceptance_deposit_type == "percent" and acceptance_deposit_value and acceptance_deposit_value > 100:
+        raise ValueError("Deposit percent cannot exceed 100.")
+      if acceptance_deposit_type == "fixed" and acceptance_deposit_value and acceptance_deposit_value > total:
+        raise ValueError("Deposit amount cannot exceed the estimate total.")
+      if acceptance_deposit_type and (acceptance_deposit_value or 0) <= 0:
+        raise ValueError("Deposit value must be greater than zero.")
+    elif not accepted_at:
+      acceptance_token = None
+      acceptance_deposit_type = None
+      acceptance_deposit_value = None
 
   return {
     "type": doc_type,
@@ -581,6 +741,14 @@ def build_document_payload(conn, payload: dict, existing: dict | None = None) ->
     "accept_paypal": int(parse_bool(payload.get("accept_paypal", (existing or {}).get("accept_paypal", settings.get("default_accept_paypal", "0"))), False)),
     "accept_venmo": int(parse_bool(payload.get("accept_venmo", (existing or {}).get("accept_venmo", settings.get("default_accept_venmo", "0"))), False)),
     "use_full_portal": int(parse_bool(payload.get("use_full_portal", (existing or {}).get("use_full_portal", 1)), True)),
+    "acceptance_enabled": acceptance_enabled,
+    "acceptance_token": acceptance_token,
+    "acceptance_deposit_type": acceptance_deposit_type,
+    "acceptance_deposit_value": acceptance_deposit_value,
+    "accepted_at": accepted_at,
+    "accepted_by_name": clean_text((existing or {}).get("accepted_by_name")) or None,
+    "accepted_by_email": clean_text((existing or {}).get("accepted_by_email")) or None,
+    "deposit_invoice_document_id": (existing or {}).get("deposit_invoice_document_id"),
     "lines": lines,
   }
 
@@ -614,6 +782,14 @@ def save_document(conn, payload: dict, document_id: int | None = None) -> int:
     "accept_paypal": doc["accept_paypal"],
     "accept_venmo": doc["accept_venmo"],
     "use_full_portal": doc["use_full_portal"],
+    "acceptance_enabled": doc["acceptance_enabled"],
+    "acceptance_token": doc["acceptance_token"],
+    "acceptance_deposit_type": doc["acceptance_deposit_type"],
+    "acceptance_deposit_value": doc["acceptance_deposit_value"],
+    "accepted_at": doc["accepted_at"],
+    "accepted_by_name": doc["accepted_by_name"],
+    "accepted_by_email": doc["accepted_by_email"],
+    "deposit_invoice_document_id": doc["deposit_invoice_document_id"],
     "converted_from_document_id": doc["converted_from_document_id"],
   }
   persisted_values = {key: value for key, value in base_values.items() if key in available_columns}
@@ -1389,12 +1565,46 @@ def app_base_url() -> str:
   return request.url_root.rstrip("/")
 
 
+def public_app_base_url(settings: dict, fallback: str | None = None) -> str:
+  configured = clean_text(settings.get("public_app_base_url"))
+  if configured:
+    return configured.rstrip("/")
+  fallback_value = clean_text(fallback)
+  if fallback_value:
+    return fallback_value.rstrip("/")
+  return app_base_url()
+
+
 def supabase_is_configured(settings: dict) -> bool:
   return bool(clean_text(settings.get("supabase_url")) and clean_text(settings.get("supabase_secret_key")))
 
 
 def hosted_payment_base_url(settings: dict) -> str:
   return clean_text(settings.get("invoice_payment_url_base"))
+
+
+def estimate_acceptance_enabled(document: dict) -> bool:
+  return bool(
+    document.get("type") == "estimate"
+    and parse_bool(document.get("acceptance_enabled"), False)
+    and clean_text(document.get("acceptance_token"))
+  )
+
+
+def build_estimate_acceptance_url(document: dict, settings: dict, fallback_base: str | None = None) -> str | None:
+  if not estimate_acceptance_enabled(document):
+    return None
+  base = public_app_base_url(settings, fallback=fallback_base)
+  token = clean_text(document.get("acceptance_token"))
+  if not base or not token:
+    return None
+  return f"{base}/accept-estimate/{quote(token)}"
+
+
+def decorate_document_acceptance(document: dict, settings: dict, fallback_base: str | None = None) -> dict:
+  document["acceptance_url"] = build_estimate_acceptance_url(document, settings, fallback_base=fallback_base)
+  document["acceptance_deposit"] = estimate_deposit_breakdown(document)
+  return document
 
 
 def hosted_payments_are_configured(settings: dict) -> bool:
@@ -1770,6 +1980,123 @@ def ensure_document_payment_url(conn, document: dict, settings: dict, persist: b
     )
   document["payment_url"] = payment_url
   return payment_url
+
+
+def fetch_document_by_acceptance_token(conn, acceptance_token: str):
+  token = clean_text(acceptance_token)
+  if not token:
+    return None
+  row = conn.execute(
+    "SELECT id FROM documents WHERE type='estimate' AND acceptance_token=? LIMIT 1",
+    (token,),
+  ).fetchone()
+  if not row:
+    return None
+  return fetch_document(conn, int(row["id"]))
+
+
+def ensure_invoice_payment_ready(conn, document: dict, settings: dict) -> dict:
+  if document["type"] != "invoice":
+    return document
+  if hosted_payments_are_configured(settings):
+    try:
+      publish_invoice_to_hosted_payments(conn, document, settings)
+    except Exception:
+      if not document.get("cloud_public_id"):
+        document["cloud_sync_status"] = "sync_failed"
+  ensure_document_payment_url(conn, document, settings, persist=True)
+  return document
+
+
+def get_estimate_deposit_invoice(conn, estimate: dict, settings: dict) -> dict | None:
+  deposit_invoice_id = estimate.get("deposit_invoice_document_id")
+  if not deposit_invoice_id:
+    return None
+  if hosted_payments_are_configured(settings):
+    try:
+      sync_hosted_payment_statuses(conn, settings, document_ids=[deposit_invoice_id])
+    except Exception:
+      pass
+  invoice = fetch_document(conn, int(deposit_invoice_id))
+  if not invoice:
+    return None
+  ensure_invoice_payment_ready(conn, invoice, settings)
+  return invoice
+
+
+def create_deposit_invoice_from_estimate(conn, estimate: dict, settings: dict) -> dict | None:
+  existing_invoice = get_estimate_deposit_invoice(conn, estimate, settings)
+  if existing_invoice:
+    return existing_invoice
+
+  deposit = estimate_deposit_breakdown(estimate)
+  if not deposit:
+    return None
+
+  deposit_terms = "Deposit due on acceptance."
+  if clean_text(estimate.get("terms")):
+    deposit_terms = f"{deposit_terms} Remaining balance terms: {clean_text(estimate.get('terms'))}"
+
+  accepted_label = clean_text(estimate.get("accepted_by_name")) or estimate["customer"].get("contact_name") or estimate["customer"]["name"]
+  note_lines = [f"{deposit['summary']} created from accepted estimate {estimate['number']}."]
+  if accepted_label:
+    note_lines.append(f"Accepted by: {accepted_label}")
+  if clean_text(estimate.get("accepted_by_email")):
+    note_lines.append(f"Acceptance email: {clean_text(estimate.get('accepted_by_email'))}")
+  if clean_text(estimate.get("notes")):
+    note_lines.append("")
+    note_lines.append(clean_text(estimate.get("notes")))
+
+  invoice_payload = {
+    "type": "invoice",
+    "customer_id": estimate["customer_id"],
+    "issue_date": date.today().isoformat(),
+    "due_date": None,
+    "status": "open",
+    "tax_rate": estimate["tax_rate"],
+    "notes": "\n".join(note_lines),
+    "terms": deposit_terms,
+    "converted_from_document_id": estimate["id"],
+    "accept_manual_ach": estimate.get("accept_manual_ach", True),
+    "accept_stripe_card": estimate.get("accept_stripe_card", True),
+    "accept_stripe_ach": estimate.get("accept_stripe_ach", True),
+    "accept_paypal": estimate.get("accept_paypal", False),
+    "accept_venmo": estimate.get("accept_venmo", False),
+    "use_full_portal": estimate.get("use_full_portal", True),
+    "lines": deposit["lines"],
+  }
+  invoice_id = save_document(conn, invoice_payload)
+  invoice = fetch_document(conn, invoice_id)
+  ensure_invoice_payment_ready(conn, invoice, settings)
+  conn.execute(
+    "UPDATE documents SET deposit_invoice_document_id=?, updated_at=? WHERE id=?",
+    (invoice_id, now_iso(), estimate["id"]),
+  )
+  estimate["deposit_invoice_document_id"] = invoice_id
+  return invoice
+
+
+def accept_estimate_quote(conn, estimate: dict, settings: dict, accepted_by_name: str | None = None, accepted_by_email: str | None = None) -> tuple[dict, dict | None]:
+  accepted_name = clean_text(accepted_by_name) or estimate["customer"].get("contact_name") or estimate["customer"]["name"]
+  accepted_email = clean_text(accepted_by_email) or estimate["customer"].get("email") or None
+
+  updates = {
+    "status": "accepted",
+    "acceptance_enabled": 1,
+    "accepted_at": estimate.get("accepted_at") or now_iso(),
+    "accepted_by_name": accepted_name or None,
+    "accepted_by_email": accepted_email,
+    "updated_at": now_iso(),
+  }
+  assignments = ", ".join(f"{column}=?" for column in updates.keys())
+  conn.execute(
+    f"UPDATE documents SET {assignments} WHERE id=?",
+    tuple(updates.values()) + (estimate["id"],),
+  )
+  refreshed = fetch_document(conn, estimate["id"])
+  deposit_invoice = create_deposit_invoice_from_estimate(conn, refreshed, settings)
+  refreshed = fetch_document(conn, estimate["id"])
+  return refreshed, deposit_invoice
 
 
 def build_invoice_email_draft(document: dict, settings: dict) -> dict:
@@ -2499,6 +2826,7 @@ def delete_product(product_id: int):
 def list_documents():
   doc_type = request.args.get("type")
   with db() as conn:
+    settings = business_settings_dict(conn)
     available = document_table_columns(conn)
     selected = [
       "d.id", "d.type", "d.number", "d.issue_date", "d.due_date", "d.status",
@@ -2516,6 +2844,14 @@ def list_documents():
       "accept_paypal": "0",
       "accept_venmo": "0",
       "use_full_portal": "1",
+      "acceptance_enabled": "0",
+      "acceptance_token": "NULL",
+      "acceptance_deposit_type": "NULL",
+      "acceptance_deposit_value": "NULL",
+      "accepted_at": "NULL",
+      "accepted_by_name": "NULL",
+      "accepted_by_email": "NULL",
+      "deposit_invoice_document_id": "NULL",
       "last_sent_at": "NULL",
       "last_sent_to": "NULL",
     }
@@ -2536,7 +2872,7 @@ def list_documents():
     rows = conn.execute(q, params).fetchall()
   items = []
   for row in rows:
-    items.append({
+    item = {
       "id": int(row["id"]),
       "type": row["type"],
       "number": row["number"],
@@ -2561,9 +2897,19 @@ def list_documents():
       "accept_paypal": bool(row["accept_paypal"]) if "accept_paypal" in row.keys() else False,
       "accept_venmo": bool(row["accept_venmo"]) if "accept_venmo" in row.keys() else False,
       "use_full_portal": bool(row["use_full_portal"]) if "use_full_portal" in row.keys() else True,
+      "acceptance_enabled": bool(row["acceptance_enabled"]) if "acceptance_enabled" in row.keys() else False,
+      "acceptance_token": row["acceptance_token"] if "acceptance_token" in row.keys() else None,
+      "acceptance_deposit_type": clean_text(row["acceptance_deposit_type"]).lower() if "acceptance_deposit_type" in row.keys() and row["acceptance_deposit_type"] not in (None, "") else None,
+      "acceptance_deposit_value": round(float(row["acceptance_deposit_value"] or 0), 2) if "acceptance_deposit_value" in row.keys() and row["acceptance_deposit_value"] not in (None, "") else None,
+      "accepted_at": row["accepted_at"] if "accepted_at" in row.keys() else None,
+      "accepted_by_name": row["accepted_by_name"] if "accepted_by_name" in row.keys() else None,
+      "accepted_by_email": row["accepted_by_email"] if "accepted_by_email" in row.keys() else None,
+      "deposit_invoice_document_id": int(row["deposit_invoice_document_id"]) if "deposit_invoice_document_id" in row.keys() and row["deposit_invoice_document_id"] not in (None, "") else None,
       "last_sent_at": row["last_sent_at"] if "last_sent_at" in row.keys() else None,
       "last_sent_to": row["last_sent_to"] if "last_sent_to" in row.keys() else None,
-    })
+    }
+    decorate_document_acceptance(item, settings, fallback_base=request.url_root)
+    items.append(item)
   return jsonify(items)
 
 
@@ -2574,6 +2920,7 @@ def get_document(document_id: int):
     if document:
       settings = business_settings_dict(conn)
       ensure_document_payment_url(conn, document, settings, persist=False)
+      decorate_document_acceptance(document, settings, fallback_base=request.url_root)
   if not document:
     return json_error("Document not found", 404)
   return jsonify(document)
@@ -2790,6 +3137,27 @@ def convert_document_to_invoice(document_id: int):
         return json_error("Estimate not found", 404)
       if document["type"] != "estimate":
         return json_error("Only estimates can be converted", 400)
+      settings = business_settings_dict(conn)
+      deposit_invoice = get_estimate_deposit_invoice(conn, document, settings)
+      invoice_lines = [
+        {
+          "product_id": line.get("product_id"),
+          "description": line["description"],
+          "quantity": line["quantity"],
+          "unit_price": line["unit_price"],
+          "taxable": line["taxable"],
+        }
+        for line in document["lines"]
+      ]
+      if deposit_invoice and clean_text(deposit_invoice.get("status")).lower() == "paid":
+        for line in deposit_invoice.get("lines", []):
+          invoice_lines.append({
+            "product_id": None,
+            "description": f"Deposit credit - {line['description']}",
+            "quantity": 1,
+            "unit_price": -round(float(line.get("line_total") or 0), 2),
+            "taxable": bool(line.get("taxable")),
+          })
       invoice_payload = {
         "type": "invoice",
         "customer_id": document["customer_id"],
@@ -2800,16 +3168,7 @@ def convert_document_to_invoice(document_id: int):
         "notes": document["notes"],
         "terms": document["terms"],
         "converted_from_document_id": document["id"],
-        "lines": [
-          {
-            "product_id": line.get("product_id"),
-            "description": line["description"],
-            "quantity": line["quantity"],
-            "unit_price": line["unit_price"],
-            "taxable": line["taxable"],
-          }
-          for line in document["lines"]
-        ],
+        "lines": invoice_lines,
       }
       invoice_id = save_document(conn, invoice_payload)
       invoice = fetch_document(conn, invoice_id)
@@ -2825,6 +3184,7 @@ def print_document(document_id: int):
     if not document:
       return json_error("Document not found", 404)
     settings = business_settings_dict(conn)
+    decorate_document_acceptance(document, settings, fallback_base=request.url_root)
   return render_template(
     "document_print.html",
     title=document["number"],
@@ -2904,6 +3264,56 @@ def invoice_report_pdf():
     )
   except Exception as exc:
     return json_error(str(exc))
+
+
+@app.route("/accept-estimate/<acceptance_token>", methods=["GET", "POST"])
+def accept_estimate_page(acceptance_token: str):
+  error_message = ""
+  accepted_recently = request.args.get("accepted") == "1"
+  with db() as conn:
+    estimate = fetch_document_by_acceptance_token(conn, acceptance_token)
+    if not estimate:
+      return "Estimate acceptance link not found.", 404
+    settings = business_settings_dict(conn)
+    decorate_document_acceptance(estimate, settings, fallback_base=request.url_root)
+    if not estimate_acceptance_enabled(estimate):
+      return "This estimate is not accepting online approvals.", 404
+
+    deposit_invoice = get_estimate_deposit_invoice(conn, estimate, settings) if estimate.get("deposit_invoice_document_id") else None
+    if request.method == "POST":
+      accepted_name = clean_text(request.form.get("name")) or estimate["customer"].get("contact_name") or estimate["customer"]["name"]
+      accepted_email = clean_text(request.form.get("email")) or estimate["customer"].get("email") or ""
+      try:
+        estimate, deposit_invoice = accept_estimate_quote(
+          conn,
+          estimate,
+          settings,
+          accepted_by_name=accepted_name,
+          accepted_by_email=accepted_email,
+        )
+        decorate_document_acceptance(estimate, settings, fallback_base=request.url_root)
+        if deposit_invoice and clean_text(deposit_invoice.get("payment_url")) and clean_text(deposit_invoice.get("status")).lower() != "paid":
+          return redirect(deposit_invoice["payment_url"])
+        return redirect(f"{request.path}?accepted=1")
+      except Exception as exc:
+        error_message = str(exc)
+        estimate = fetch_document_by_acceptance_token(conn, acceptance_token) or estimate
+        decorate_document_acceptance(estimate, settings, fallback_base=request.url_root)
+        deposit_invoice = get_estimate_deposit_invoice(conn, estimate, settings) if estimate.get("deposit_invoice_document_id") else None
+
+  return render_template(
+    "estimate_accept.html",
+    title=f"Accept {estimate['number']}",
+    document=estimate,
+    business=settings,
+    deposit=estimate.get("acceptance_deposit"),
+    deposit_invoice=deposit_invoice,
+    accepted=bool(estimate.get("accepted_at")),
+    accepted_recently=accepted_recently,
+    error_message=error_message,
+    logo_src="/api/business_logo",
+    sbooks_logo_src=sbooks_brand_data_uri(),
+  )
 
 
 @app.get("/pay/<int:document_id>")

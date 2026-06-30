@@ -144,12 +144,80 @@ function renderSettings() {
 }
 
 function documentPaymentSyncMeta(document) {
-  if (!document) return "Desktop-only until you publish this invoice to the hosted payment service.";
+  if (!document || document.type !== "invoice") {
+    return "These payment settings will be copied onto the deposit invoice when the customer accepts.";
+  }
   if (!document.cloud_public_id) return "Desktop-only until you publish this invoice to the hosted payment service.";
   const status = document.cloud_sync_status || "synced";
   const syncedAt = document.cloud_synced_at ? ` on ${document.cloud_synced_at}` : "";
   const paymentUrl = document.payment_url ? ` | ${document.payment_url}` : "";
   return `Hosted payment ID ${document.cloud_public_id} | sync status: ${status}${syncedAt}${paymentUrl}`;
+}
+
+function documentAcceptanceMeta(document) {
+  if (!document || document.type !== "estimate") {
+    return "Save the estimate with customer acceptance enabled to generate a shareable acceptance page.";
+  }
+  const parts = [];
+  if (document.acceptance_enabled) {
+    parts.push(document.acceptance_url || "Acceptance is enabled. Save the estimate to generate the public link.");
+  } else {
+    parts.push("Customer acceptance is off for this estimate.");
+  }
+  if (document.acceptance_deposit?.summary) parts.push(document.acceptance_deposit.summary);
+  if (document.accepted_at) {
+    const acceptedBy = document.accepted_by_name ? ` by ${document.accepted_by_name}` : "";
+    parts.push(`Accepted ${document.accepted_at}${acceptedBy}`);
+  }
+  if (document.deposit_invoice_document_id) {
+    parts.push(`Deposit invoice #${document.deposit_invoice_document_id}`);
+  }
+  return parts.join(" | ");
+}
+
+function setDocumentAcceptanceUrl(url) {
+  const form = $("#documentForm");
+  if (!form) return;
+  form.dataset.acceptanceUrl = url || "";
+}
+
+function syncDocumentModeUi(docRecord = null) {
+  const form = $("#documentForm");
+  if (!form) return;
+  const type = form.querySelector("[name='type']")?.value || "estimate";
+  const acceptanceEnabled = form.querySelector("[name='acceptance_enabled']")?.checked;
+  const acceptanceUrl = docRecord?.acceptance_url || form.dataset.acceptanceUrl || "";
+  const statusSelect = form.querySelector("[name='status']");
+  const acceptedOption = statusSelect?.querySelector("option[value='accepted']");
+  if (acceptedOption) acceptedOption.hidden = type !== "estimate";
+  if (type !== "estimate" && statusSelect?.value === "accepted") statusSelect.value = "open";
+
+  window.document.querySelectorAll(".invoice-only").forEach((el) => el.classList.toggle("hidden", type !== "invoice"));
+  window.document.querySelectorAll(".estimate-only").forEach((el) => el.classList.toggle("hidden", type !== "estimate"));
+  window.document.querySelectorAll(".estimate-accept-enabled-only").forEach((el) => {
+    el.classList.toggle("hidden", type !== "estimate" || !acceptanceEnabled);
+  });
+
+  const paymentMeta = $("#documentPaymentSyncMeta");
+  if (paymentMeta) {
+    paymentMeta.textContent = documentPaymentSyncMeta(docRecord || { type });
+  }
+
+  const acceptanceMeta = $("#documentAcceptanceMeta");
+  if (acceptanceMeta) {
+    acceptanceMeta.textContent = documentAcceptanceMeta(docRecord || { type, acceptance_enabled: acceptanceEnabled, acceptance_url: acceptanceUrl });
+  }
+
+  const openBtn = $("#openAcceptanceBtn");
+  if (openBtn) {
+    openBtn.classList.toggle("hidden", type !== "estimate" || !acceptanceUrl);
+    openBtn.disabled = !acceptanceUrl;
+  }
+  const copyBtn = $("#copyAcceptanceBtn");
+  if (copyBtn) {
+    copyBtn.classList.toggle("hidden", type !== "estimate" || !acceptanceUrl);
+    copyBtn.disabled = !acceptanceUrl;
+  }
 }
 
 function renderCustomers() {
@@ -215,6 +283,8 @@ function renderDocuments() {
       <td class="row-actions">
         <button class="btn btn-secondary" type="button" data-edit-document="${d.id}">Edit</button>
         ${d.type === "estimate" ? `<button class="btn btn-secondary" type="button" data-convert-document="${d.id}">Convert</button>` : ``}
+        ${d.type === "estimate" && d.acceptance_url ? `<a class="btn btn-secondary" target="_blank" rel="noopener" href="${escapeAttr(d.acceptance_url)}">Accept Page</a>` : ``}
+        ${d.type === "estimate" && d.deposit_invoice_document_id ? `<button class="btn btn-secondary" type="button" data-edit-document="${d.deposit_invoice_document_id}">Deposit Invoice</button>` : ``}
         ${d.type === "invoice" ? `<button class="btn btn-secondary" type="button" data-publish-document="${d.id}">${d.cloud_public_id ? "Republish Pay Link" : "Publish Pay Link"}</button>` : ``}
         ${d.type === "invoice" ? `<button class="btn btn-secondary" type="button" data-review-email="${d.id}">Review & Send</button>` : ``}
         <a class="btn btn-secondary" target="_blank" rel="noopener" href="/api/documents/${d.id}/print">Print</a>
@@ -367,9 +437,17 @@ function resetDocumentForm() {
     accept_paypal: asCheckedValue(state.settings.default_accept_paypal),
     accept_venmo: asCheckedValue(state.settings.default_accept_venmo),
     use_full_portal: true,
+    acceptance_enabled: false,
+    acceptance_deposit_type: "",
+    acceptance_deposit_value: "",
   });
+  setDocumentAcceptanceUrl("");
   $("#documentPaymentSyncMeta").textContent = documentPaymentSyncMeta(null);
+  if ($("#documentAcceptanceMeta")) {
+    $("#documentAcceptanceMeta").textContent = documentAcceptanceMeta(null);
+  }
   renderDocumentLines([emptyLine()]);
+  syncDocumentModeUi();
 }
 
 function renderImportPreview() {
@@ -550,7 +628,6 @@ async function saveDocument(e) {
     alert("Add at least one line item.");
     return;
   }
-  if (payload.type === "estimate") payload.status = "draft";
   if (id) await apiJson(`/api/documents/${id}`, "PATCH", payload);
   else await apiJson("/api/documents", "POST", payload);
   await loadAll();
@@ -595,9 +672,17 @@ async function editDocument(id) {
     accept_paypal: document.accept_paypal,
     accept_venmo: document.accept_venmo,
     use_full_portal: document.use_full_portal,
+    acceptance_enabled: document.acceptance_enabled,
+    acceptance_deposit_type: document.acceptance_deposit_type || "",
+    acceptance_deposit_value: document.acceptance_deposit_value ?? "",
   });
+  setDocumentAcceptanceUrl(document.acceptance_url || "");
   $("#documentPaymentSyncMeta").textContent = documentPaymentSyncMeta(document);
+  if ($("#documentAcceptanceMeta")) {
+    $("#documentAcceptanceMeta").textContent = documentAcceptanceMeta(document);
+  }
   renderDocumentLines(document.lines || [emptyLine()]);
+  syncDocumentModeUi(document);
   window.scrollTo({ top: $("#documentForm").offsetTop - 80, behavior: "smooth" });
 }
 
@@ -647,6 +732,16 @@ async function publishDocumentPayment() {
   if ($("#emailComposerForm [name='document_id']").value === String(documentId)) {
     await loadEmailDraft(documentId);
   }
+}
+
+async function copyAcceptanceLink() {
+  const url = $("#documentForm")?.dataset.acceptanceUrl || "";
+  if (!url) {
+    alert("Save the estimate with customer acceptance enabled to generate the public link.");
+    return;
+  }
+  await navigator.clipboard.writeText(url);
+  setStatus(`Acceptance link copied. ${url}`);
 }
 
 async function refreshEmailDraft() {
@@ -726,12 +821,20 @@ function bindEvents() {
   });
   $("#sendInvoiceSmsBtn").addEventListener("click", () => sendInvoiceSms().catch(showError));
   $("#publishDocumentBtn").addEventListener("click", () => publishDocumentPayment().catch(showError));
+  $("#openAcceptanceBtn")?.addEventListener("click", () => {
+    const url = $("#documentForm")?.dataset.acceptanceUrl || "";
+    if (!url) return alert("Save the estimate with customer acceptance enabled to generate the public link.");
+    window.open(url, "_blank", "noopener");
+  });
+  $("#copyAcceptanceBtn")?.addEventListener("click", () => copyAcceptanceLink().catch(showError));
   $("#smtpProviderSelect").addEventListener("change", (e) => {
     applySmtpPreset(e.target.value, true);
   });
   $("#resetCustomerBtn").addEventListener("click", resetCustomerForm);
   $("#resetProductBtn").addEventListener("click", resetProductForm);
   $("#resetDocumentBtn").addEventListener("click", resetDocumentForm);
+  $("#documentForm [name='type']")?.addEventListener("change", () => syncDocumentModeUi());
+  $("#documentForm [name='acceptance_enabled']")?.addEventListener("change", () => syncDocumentModeUi());
   $("#addLineBtn").addEventListener("click", () => {
     $("#documentLines").insertAdjacentHTML("beforeend", lineRowHtml(emptyLine()));
     renderDocumentTotals();

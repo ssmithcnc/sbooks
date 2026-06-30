@@ -161,6 +161,14 @@ CREATE TABLE IF NOT EXISTS documents (
   accept_paypal INTEGER NOT NULL DEFAULT 0,
   accept_venmo INTEGER NOT NULL DEFAULT 0,
   use_full_portal INTEGER NOT NULL DEFAULT 1,
+  acceptance_enabled INTEGER NOT NULL DEFAULT 0,
+  acceptance_token TEXT,
+  acceptance_deposit_type TEXT,
+  acceptance_deposit_value REAL,
+  accepted_at TEXT,
+  accepted_by_name TEXT,
+  accepted_by_email TEXT,
+  deposit_invoice_document_id INTEGER,
   last_sent_at TEXT,
   last_sent_to TEXT,
   last_email_error TEXT,
@@ -168,6 +176,7 @@ CREATE TABLE IF NOT EXISTS documents (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(customer_id) REFERENCES customers(id),
+  FOREIGN KEY(deposit_invoice_document_id) REFERENCES documents(id),
   FOREIGN KEY(converted_from_document_id) REFERENCES documents(id)
 );
 
@@ -235,6 +244,7 @@ def init_db():
       "twilio_account_sid": "",
       "twilio_auth_token": "",
       "twilio_from_number": "",
+      "public_app_base_url": "",
       "invoice_payment_url_base": "",
       "supabase_url": "",
       "supabase_publishable_key": "",
@@ -395,6 +405,22 @@ def migrate_db(conn):
       conn.execute("ALTER TABLE documents ADD COLUMN accept_venmo INTEGER NOT NULL DEFAULT 0")
     if "use_full_portal" not in cols:
       conn.execute("ALTER TABLE documents ADD COLUMN use_full_portal INTEGER NOT NULL DEFAULT 1")
+    if "acceptance_enabled" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN acceptance_enabled INTEGER NOT NULL DEFAULT 0")
+    if "acceptance_token" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN acceptance_token TEXT")
+    if "acceptance_deposit_type" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN acceptance_deposit_type TEXT")
+    if "acceptance_deposit_value" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN acceptance_deposit_value REAL")
+    if "accepted_at" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN accepted_at TEXT")
+    if "accepted_by_name" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN accepted_by_name TEXT")
+    if "accepted_by_email" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN accepted_by_email TEXT")
+    if "deposit_invoice_document_id" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN deposit_invoice_document_id INTEGER")
     if "last_sent_at" not in cols:
       conn.execute("ALTER TABLE documents ADD COLUMN last_sent_at TEXT")
     if "last_sent_to" not in cols:
