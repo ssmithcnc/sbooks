@@ -130,6 +130,35 @@ class EstimateAcceptanceFlowTest(unittest.TestCase):
     self.assertEqual(invoice["lines"][1]["description"], "Deposit credit - 50% deposit for Estimate EST-1001")
     self.assertEqual(invoice["lines"][1]["line_total"], -500.0)
 
+  def test_public_app_base_url_can_be_inferred_from_hosted_invoice_base(self):
+    with db_module.db() as conn:
+      conn.execute(
+        "INSERT OR REPLACE INTO business_settings(key, value) VALUES (?, ?)",
+        ("invoice_payment_url_base", "https://quotes.example.com/invoice/{public_id}"),
+      )
+      settings = app_module.business_settings_dict(conn)
+
+    self.assertEqual(app_module.public_app_base_url(settings), "https://quotes.example.com")
+
+  def test_remote_deposit_invoice_identifiers_can_be_preserved_locally(self):
+    estimate = self._create_estimate()
+
+    with db_module.db() as conn:
+      settings = app_module.business_settings_dict(conn)
+      estimate_document = app_module.fetch_document(conn, estimate["id"])
+      with app_module.app.test_request_context("/"):
+        deposit_invoice = app_module.create_deposit_invoice_from_estimate(
+          conn,
+          estimate_document,
+          settings,
+          remote_public_id="hosted-deposit-001",
+          invoice_number="DEP-EST-1001",
+        )
+
+      self.assertIsNotNone(deposit_invoice)
+      self.assertEqual(deposit_invoice["number"], "DEP-EST-1001")
+      self.assertEqual(deposit_invoice["cloud_public_id"], "hosted-deposit-001")
+
 
 if __name__ == "__main__":
   unittest.main()

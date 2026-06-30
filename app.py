@@ -492,6 +492,12 @@ def estimate_deposit_breakdown(document: dict) -> dict | None:
   }
 
 
+def estimate_deposit_invoice_number(document: dict) -> str:
+  number = clean_text(document.get("number")) or "estimate"
+  normalized = re.sub(r"\s+", "-", number)
+  return f"DEP-{normalized}"
+
+
 def serialize_customer(row) -> dict:
   return {
     "id": int(row["id"]),
@@ -1565,10 +1571,23 @@ def app_base_url() -> str:
   return request.url_root.rstrip("/")
 
 
+def infer_public_app_base_from_payment_base(settings: dict) -> str:
+  payment_base = clean_text(settings.get("invoice_payment_url_base")).rstrip("/")
+  if not payment_base:
+    return ""
+  for suffix in ("/invoice/{public_id}", "/invoice/{id}", "/invoice/{number}", "/invoice"):
+    if payment_base.endswith(suffix):
+      return payment_base[: -len(suffix)].rstrip("/")
+  return ""
+
+
 def public_app_base_url(settings: dict, fallback: str | None = None) -> str:
   configured = clean_text(settings.get("public_app_base_url"))
   if configured:
     return configured.rstrip("/")
+  inferred = infer_public_app_base_from_payment_base(settings)
+  if inferred:
+    return inferred
   fallback_value = clean_text(fallback)
   if fallback_value:
     return fallback_value.rstrip("/")
@@ -1746,9 +1765,16 @@ def publish_invoice_to_hosted_payments(conn, document: dict, settings: dict) -> 
 
   public_id = clean_text(document.get("cloud_public_id")) or uuid.uuid4().hex
   payment_page_url = hosted_payment_page_url(public_id, document, settings)
+  source_estimate_public_id = None
+  converted_from_document_id = document.get("converted_from_document_id")
+  if converted_from_document_id:
+    source_document = fetch_document(conn, int(converted_from_document_id))
+    if source_document and source_document.get("type") == "estimate":
+      source_estimate_public_id = clean_text(source_document.get("cloud_public_id")) or None
   invoice_payload = {
     "business_profile_id": business_record["id"],
     "local_invoice_id": document["id"],
+    "document_type": "invoice",
     "public_id": public_id,
     "invoice_number": document["number"],
     "customer_name": document["customer"]["name"],
@@ -1763,9 +1789,11 @@ def publish_invoice_to_hosted_payments(conn, document: dict, settings: dict) -> 
     "status": "paid" if document.get("status") == "paid" else "open",
     "payment_status": "paid" if document.get("status") == "paid" else "unpaid",
     "payment_page_url": payment_page_url,
+    "source_estimate_public_id": source_estimate_public_id,
     "metadata": {
       "source": "sbooks-desktop",
       "local_document_id": document["id"],
+      "document_type": "invoice",
       "customer_contact": document["customer"].get("contact_name") or "",
       "billing_address": document["customer"].get("billing_address") or "",
       "terms": document.get("terms") or "",
@@ -1877,6 +1905,208 @@ def publish_invoice_to_hosted_payments(conn, document: dict, settings: dict) -> 
   }
 
 
+def publish_estimate_to_hosted_payments(conn, document: dict, settings: dict) -> dict:
+  if document["type"] != "estimate":
+    raise ValueError("Only estimates can be published to the hosted acceptance flow.")
+  if not estimate_acceptance_enabled(document):
+    raise ValueError("Enable estimate acceptance before publishing a hosted acceptance page.")
+  if not hosted_payments_are_configured(settings):
+    raise ValueError("Hosted estimate acceptance requires the hosted payment base URL plus Supabase URL and secret key.")
+
+  acceptance_url = build_estimate_acceptance_url(document, settings)
+  if not acceptance_url:
+    raise ValueError("Could not build the hosted estimate acceptance URL.")
+
+  company_name = clean_text(settings.get("company_name")) or APP_TITLE
+  business_slug = slugify(company_name)
+  business_payload = {
+    "slug": business_slug,
+    "company_name": company_name,
+    "company_email": clean_text(settings.get("company_email")) or None,
+    "company_phone": clean_text(settings.get("company_phone")) or None,
+    "company_website": clean_text(settings.get("company_website")) or None,
+    "manual_bank_instructions": clean_text(settings.get("manual_bank_instructions")) or None,
+    "stripe_publishable_key": clean_text(settings.get("stripe_publishable_key")) or None,
+    "updated_at": now_iso(),
+  }
+  business_response = supabase_rest_request(
+    settings,
+    "business_profiles",
+    method="POST",
+    query={"on_conflict": "slug", "select": "id,slug"},
+    payload=business_payload,
+    prefer=["resolution=merge-duplicates", "return=representation"],
+  )
+  business_record = first_record(business_response)
+  if not business_record or not business_record.get("id"):
+    raise RuntimeError("Supabase did not return a business profile id.")
+
+  public_id = clean_text(document.get("cloud_public_id")) or uuid.uuid4().hex
+  deposit = estimate_deposit_breakdown(document)
+  deposit_invoice_public_id = None
+  if document.get("deposit_invoice_document_id"):
+    deposit_invoice = fetch_document(conn, int(document["deposit_invoice_document_id"]))
+    if deposit_invoice:
+      deposit_invoice_public_id = clean_text(deposit_invoice.get("cloud_public_id")) or None
+
+  estimate_payload = {
+    "business_profile_id": business_record["id"],
+    "local_invoice_id": document["id"],
+    "document_type": "estimate",
+    "public_id": public_id,
+    "invoice_number": document["number"],
+    "customer_name": document["customer"]["name"],
+    "customer_email": document["customer"].get("email"),
+    "issue_date": document["issue_date"],
+    "due_date": document.get("due_date"),
+    "currency": "USD",
+    "subtotal": round(float(document.get("subtotal") or 0), 2),
+    "tax_amount": round(float(document.get("tax_amount") or 0), 2),
+    "total": round(float(document.get("total") or 0), 2),
+    "amount_paid": 0,
+    "status": "accepted" if document.get("accepted_at") else "draft",
+    "payment_status": "accepted" if document.get("accepted_at") else "quote",
+    "payment_page_url": acceptance_url,
+    "acceptance_enabled": True,
+    "acceptance_token": clean_text(document.get("acceptance_token")) or None,
+    "acceptance_deposit_type": clean_text(document.get("acceptance_deposit_type")) or None,
+    "acceptance_deposit_value": (
+      round(float(document.get("acceptance_deposit_value") or 0), 2)
+      if document.get("acceptance_deposit_value") not in (None, "")
+      else None
+    ),
+    "accepted_at": document.get("accepted_at"),
+    "accepted_by_name": clean_text(document.get("accepted_by_name")) or None,
+    "accepted_by_email": clean_text(document.get("accepted_by_email")) or None,
+    "deposit_invoice_public_id": deposit_invoice_public_id,
+    "metadata": {
+      "source": "sbooks-desktop",
+      "document_type": "estimate",
+      "local_document_id": document["id"],
+      "customer_contact": document["customer"].get("contact_name") or "",
+      "billing_address": document["customer"].get("billing_address") or "",
+      "terms": document.get("terms") or "",
+      "notes": document.get("notes") or "",
+      "acceptance_url": acceptance_url,
+      "acceptance_deposit": deposit or None,
+      "use_full_portal": bool(document.get("use_full_portal")),
+      "line_items": [
+        {
+          "description": line.get("description") or "",
+          "quantity": round(float(line.get("quantity") or 0), 2),
+          "unit_price": round(float(line.get("unit_price") or 0), 2),
+          "amount": round(float(line.get("line_total") or 0), 2),
+          "product_id": line.get("product_id"),
+          "product_name": line.get("product_name"),
+          "product_sku": line.get("product_sku"),
+          "taxable": bool(line.get("taxable")),
+          "sort_order": int(line.get("sort_order") or 0),
+        }
+        for line in document.get("lines", [])
+      ],
+    },
+    "updated_at": now_iso(),
+  }
+  estimate_response = supabase_rest_request(
+    settings,
+    "invoices",
+    method="POST",
+    query={"on_conflict": "public_id", "select": "id,public_id,payment_page_url"},
+    payload=estimate_payload,
+    prefer=["resolution=merge-duplicates", "return=representation"],
+  )
+  estimate_record = first_record(estimate_response)
+  if not estimate_record or not estimate_record.get("id"):
+    raise RuntimeError("Supabase did not return an estimate id.")
+
+  supabase_rest_request(
+    settings,
+    "invoice_line_items",
+    method="DELETE",
+    query={"invoice_id": f"eq.{estimate_record['id']}"},
+  )
+
+  line_items_payload = [
+    {
+      "invoice_id": estimate_record["id"],
+      "sort_order": int(line.get("sort_order") or 0),
+      "description": line.get("description") or "",
+      "quantity": round(float(line.get("quantity") or 0), 2),
+      "unit_price": round(float(line.get("unit_price") or 0), 2),
+      "amount": round(float(line.get("line_total") or 0), 2),
+      "metadata": {
+        "product_id": line.get("product_id"),
+        "product_name": line.get("product_name"),
+        "product_sku": line.get("product_sku"),
+        "taxable": bool(line.get("taxable")),
+      },
+      "updated_at": now_iso(),
+    }
+    for line in document.get("lines", [])
+    if clean_text(line.get("description"))
+  ]
+  if line_items_payload:
+    supabase_rest_request(
+      settings,
+      "invoice_line_items",
+      method="POST",
+      payload=line_items_payload,
+      prefer=["return=representation"],
+    )
+
+  payment_options_payload = {
+    "invoice_id": estimate_record["id"],
+    "accept_manual_ach": bool(document.get("accept_manual_ach")),
+    "accept_stripe_card": bool(document.get("accept_stripe_card")),
+    "accept_stripe_ach": bool(document.get("accept_stripe_ach")),
+    "accept_paypal": bool(document.get("accept_paypal")),
+    "accept_venmo": bool(document.get("accept_venmo")),
+    "updated_at": now_iso(),
+  }
+  supabase_rest_request(
+    settings,
+    "invoice_payment_options",
+    method="POST",
+    query={"on_conflict": "invoice_id", "select": "invoice_id"},
+    payload=payment_options_payload,
+    prefer=["resolution=merge-duplicates", "return=representation"],
+  )
+
+  synced_at = now_iso()
+  persist_document_payment_link(
+    conn,
+    document["id"],
+    payment_url=acceptance_url,
+    public_id=public_id,
+    sync_status="accepted" if document.get("accepted_at") else "synced",
+    synced_at=synced_at,
+  )
+  document["cloud_public_id"] = public_id
+  document["cloud_sync_status"] = "accepted" if document.get("accepted_at") else "synced"
+  document["cloud_synced_at"] = synced_at
+  document["payment_url"] = acceptance_url
+  return {
+    "public_id": public_id,
+    "payment_url": acceptance_url,
+    "estimate_id": estimate_record["id"],
+    "business_slug": business_slug,
+    "synced_at": synced_at,
+  }
+
+
+def ensure_estimate_acceptance_ready(conn, document: dict, settings: dict) -> dict:
+  if document["type"] != "estimate":
+    return document
+  decorate_document_acceptance(document, settings)
+  if hosted_payments_are_configured(settings) and estimate_acceptance_enabled(document):
+    try:
+      publish_estimate_to_hosted_payments(conn, document, settings)
+    except Exception:
+      if not document.get("cloud_public_id"):
+        document["cloud_sync_status"] = "sync_failed"
+  return document
+
+
 def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] | None = None) -> dict:
   if not supabase_is_configured(settings):
     return {"updated": 0, "checked": 0, "updated_documents": []}
@@ -1957,6 +2187,123 @@ def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] |
   return {"updated": updated, "checked": checked, "updated_documents": updated_documents}
 
 
+def sync_hosted_estimate_acceptances(conn, settings: dict) -> dict:
+  if not supabase_is_configured(settings):
+    return {"updated": 0, "checked": 0, "updated_estimates": []}
+
+  rows = conn.execute(
+    """SELECT id, number, status, cloud_public_id, accepted_at, accepted_by_name,
+              accepted_by_email, deposit_invoice_document_id
+       FROM documents
+       WHERE type='estimate' AND cloud_public_id IS NOT NULL AND cloud_public_id != ''"""
+  ).fetchall()
+  if not rows:
+    return {"updated": 0, "checked": 0, "updated_estimates": []}
+
+  public_ids = [clean_text(row["cloud_public_id"]) for row in rows if clean_text(row["cloud_public_id"])]
+  if not public_ids:
+    return {"updated": 0, "checked": 0, "updated_estimates": []}
+
+  remote_rows = supabase_rest_request(
+    settings,
+    "invoices",
+    query={
+      "select": "public_id,status,accepted_at,accepted_by_name,accepted_by_email,deposit_invoice_public_id",
+      "public_id": f"in.({','.join(public_ids)})",
+      "document_type": "eq.estimate",
+    },
+  ) or []
+  remote_by_public_id = {
+    clean_text(item.get("public_id")): item
+    for item in remote_rows
+    if clean_text(item.get("public_id"))
+  }
+
+  updated = 0
+  checked = 0
+  updated_estimates = []
+  available = document_table_columns(conn)
+  for row in rows:
+    public_id = clean_text(row["cloud_public_id"])
+    remote = remote_by_public_id.get(public_id)
+    if not remote:
+      continue
+    checked += 1
+    local_status = clean_text(row["status"]).lower()
+    remote_status = clean_text(remote.get("status")).lower() or "draft"
+    remote_accepted_at = clean_text(remote.get("accepted_at")) or None
+    remote_accepted_by_name = clean_text(remote.get("accepted_by_name")) or None
+    remote_accepted_by_email = clean_text(remote.get("accepted_by_email")) or None
+    remote_deposit_public_id = clean_text(remote.get("deposit_invoice_public_id")) or None
+
+    changes = {}
+    if remote_accepted_at:
+      if "status" in available and local_status != "accepted":
+        changes["status"] = "accepted"
+      if "acceptance_enabled" in available:
+        changes["acceptance_enabled"] = 1
+      if "accepted_at" in available and clean_text(row["accepted_at"]) != remote_accepted_at:
+        changes["accepted_at"] = remote_accepted_at
+      if "accepted_by_name" in available and clean_text(row["accepted_by_name"]) != clean_text(remote_accepted_by_name):
+        changes["accepted_by_name"] = remote_accepted_by_name
+      if "accepted_by_email" in available and clean_text(row["accepted_by_email"]) != clean_text(remote_accepted_by_email):
+        changes["accepted_by_email"] = remote_accepted_by_email
+      if "cloud_sync_status" in available:
+        changes["cloud_sync_status"] = "accepted"
+
+    if "cloud_synced_at" in available:
+      changes["cloud_synced_at"] = now_iso()
+
+    if changes:
+      changes["updated_at"] = now_iso()
+      assignments = ", ".join(f"{column}=?" for column in changes.keys())
+      conn.execute(
+        f"UPDATE documents SET {assignments} WHERE id=?",
+        tuple(changes.values()) + (row["id"],)
+      )
+      updated += 1
+
+    estimate = None
+    local_deposit_invoice_id = int(row["deposit_invoice_document_id"]) if row["deposit_invoice_document_id"] not in (None, "") else None
+    deposit_invoice = None
+    if remote_deposit_public_id:
+      deposit_invoice = fetch_document_by_cloud_public_id(conn, remote_deposit_public_id, doc_type="invoice")
+      if not deposit_invoice:
+        estimate = fetch_document(conn, int(row["id"]))
+        if estimate:
+          deposit_invoice = create_deposit_invoice_from_estimate(
+            conn,
+            estimate,
+            settings,
+            remote_public_id=remote_deposit_public_id,
+            invoice_number=estimate_deposit_invoice_number(estimate),
+          )
+          if deposit_invoice and hosted_payments_are_configured(settings):
+            try:
+              sync_hosted_payment_statuses(conn, settings, document_ids=[deposit_invoice["id"]])
+            except Exception:
+              pass
+      if deposit_invoice and local_deposit_invoice_id != deposit_invoice["id"]:
+        conn.execute(
+          "UPDATE documents SET deposit_invoice_document_id=?, updated_at=? WHERE id=?",
+          (deposit_invoice["id"], now_iso(), row["id"]),
+        )
+        local_deposit_invoice_id = deposit_invoice["id"]
+        updated += 1
+
+    updated_estimates.append({
+      "id": row["id"],
+      "number": clean_text(row["number"]),
+      "public_id": public_id,
+      "status": remote_status,
+      "accepted_at": remote_accepted_at,
+      "deposit_invoice_public_id": remote_deposit_public_id,
+      "deposit_invoice_document_id": local_deposit_invoice_id,
+    })
+
+  return {"updated": updated, "checked": checked, "updated_estimates": updated_estimates}
+
+
 def build_payment_url(document: dict, settings: dict) -> str:
   base = hosted_payment_base_url(settings)
   public_id = clean_text(document.get("cloud_public_id"))
@@ -1995,6 +2342,22 @@ def fetch_document_by_acceptance_token(conn, acceptance_token: str):
   return fetch_document(conn, int(row["id"]))
 
 
+def fetch_document_by_cloud_public_id(conn, public_id: str, doc_type: str | None = None):
+  public_token = clean_text(public_id)
+  if not public_token:
+    return None
+  query = "SELECT id FROM documents WHERE cloud_public_id=?"
+  params: list[str] = [public_token]
+  if doc_type in {"estimate", "invoice"}:
+    query += " AND type=?"
+    params.append(doc_type)
+  query += " LIMIT 1"
+  row = conn.execute(query, params).fetchone()
+  if not row:
+    return None
+  return fetch_document(conn, int(row["id"]))
+
+
 def ensure_invoice_payment_ready(conn, document: dict, settings: dict) -> dict:
   if document["type"] != "invoice":
     return document
@@ -2024,7 +2387,13 @@ def get_estimate_deposit_invoice(conn, estimate: dict, settings: dict) -> dict |
   return invoice
 
 
-def create_deposit_invoice_from_estimate(conn, estimate: dict, settings: dict) -> dict | None:
+def create_deposit_invoice_from_estimate(
+  conn,
+  estimate: dict,
+  settings: dict,
+  remote_public_id: str | None = None,
+  invoice_number: str | None = None,
+) -> dict | None:
   existing_invoice = get_estimate_deposit_invoice(conn, estimate, settings)
   if existing_invoice:
     return existing_invoice
@@ -2049,6 +2418,7 @@ def create_deposit_invoice_from_estimate(conn, estimate: dict, settings: dict) -
 
   invoice_payload = {
     "type": "invoice",
+    "number": clean_text(invoice_number) or None,
     "customer_id": estimate["customer_id"],
     "issue_date": date.today().isoformat(),
     "due_date": None,
@@ -2063,6 +2433,7 @@ def create_deposit_invoice_from_estimate(conn, estimate: dict, settings: dict) -
     "accept_paypal": estimate.get("accept_paypal", False),
     "accept_venmo": estimate.get("accept_venmo", False),
     "use_full_portal": estimate.get("use_full_portal", True),
+    "cloud_public_id": clean_text(remote_public_id) or None,
     "lines": deposit["lines"],
   }
   invoice_id = save_document(conn, invoice_payload)
@@ -2096,6 +2467,7 @@ def accept_estimate_quote(conn, estimate: dict, settings: dict, accepted_by_name
   refreshed = fetch_document(conn, estimate["id"])
   deposit_invoice = create_deposit_invoice_from_estimate(conn, refreshed, settings)
   refreshed = fetch_document(conn, estimate["id"])
+  ensure_estimate_acceptance_ready(conn, refreshed, settings)
   return refreshed, deposit_invoice
 
 
@@ -2695,8 +3067,9 @@ def sync_hosted_payments():
     document_ids = [int(doc_id) for doc_id in requested_ids if str(doc_id).strip()]
     with db() as conn:
       settings = business_settings_dict(conn)
-      result = sync_hosted_payment_statuses(conn, settings, document_ids=document_ids or None)
-    return jsonify({"ok": True, **result})
+      invoice_result = sync_hosted_payment_statuses(conn, settings, document_ids=document_ids or None)
+      estimate_result = sync_hosted_estimate_acceptances(conn, settings)
+    return jsonify({"ok": True, **invoice_result, "estimate_sync": estimate_result})
   except Exception as exc:
     return json_error(str(exc))
 
@@ -2919,6 +3292,7 @@ def get_document(document_id: int):
     document = fetch_document(conn, document_id)
     if document:
       settings = business_settings_dict(conn)
+      ensure_estimate_acceptance_ready(conn, document, settings)
       ensure_document_payment_url(conn, document, settings, persist=False)
       decorate_document_acceptance(document, settings, fallback_base=request.url_root)
   if not document:
@@ -3101,6 +3475,9 @@ def create_document():
     with db() as conn:
       document_id = save_document(conn, payload)
       document = fetch_document(conn, document_id)
+      settings = business_settings_dict(conn)
+      ensure_estimate_acceptance_ready(conn, document, settings)
+      decorate_document_acceptance(document, settings, fallback_base=request.url_root)
     return jsonify({"ok": True, "document": document})
   except Exception as exc:
     return json_error(str(exc))
@@ -3115,6 +3492,9 @@ def update_document(document_id: int):
         return json_error("Document not found", 404)
       save_document(conn, payload, document_id=document_id)
       document = fetch_document(conn, document_id)
+      settings = business_settings_dict(conn)
+      ensure_estimate_acceptance_ready(conn, document, settings)
+      decorate_document_acceptance(document, settings, fallback_base=request.url_root)
     return jsonify({"ok": True, "document": document})
   except Exception as exc:
     return json_error(str(exc))
@@ -3184,6 +3564,7 @@ def print_document(document_id: int):
     if not document:
       return json_error("Document not found", 404)
     settings = business_settings_dict(conn)
+    ensure_estimate_acceptance_ready(conn, document, settings)
     decorate_document_acceptance(document, settings, fallback_base=request.url_root)
   return render_template(
     "document_print.html",
@@ -3202,6 +3583,8 @@ def pdf_document(document_id: int):
       if not document:
         return json_error("Document not found", 404)
       settings = business_settings_dict(conn)
+      ensure_estimate_acceptance_ready(conn, document, settings)
+      decorate_document_acceptance(document, settings, fallback_base=request.url_root)
     payload = render_document_pdf_bytes(document, settings)
     return send_file(
       io.BytesIO(payload),

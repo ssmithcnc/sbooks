@@ -218,12 +218,19 @@ async function markInvoicePaid(invoiceId: string, latestCheckoutUrl: string | nu
   const supabase = getSupabaseAdmin();
   const { data } = await supabase
     .from("invoices")
-    .select("id, total, amount_paid, latest_checkout_url")
+    .select("id, public_id, total, amount_paid, latest_checkout_url, payment_status, status")
     .eq("id", invoiceId)
-    .returns<Pick<InvoiceRecord, "id" | "total" | "amount_paid" | "latest_checkout_url"> | null>()
+    .returns<
+      | Pick<InvoiceRecord, "id" | "public_id" | "total" | "amount_paid" | "latest_checkout_url" | "payment_status" | "status">
+      | null
+    >()
     .maybeSingle();
 
-  const invoice = data as Pick<InvoiceRecord, "id" | "total" | "amount_paid" | "latest_checkout_url"> | null;
+  const invoice = data as
+    | Pick<InvoiceRecord, "id" | "public_id" | "total" | "amount_paid" | "latest_checkout_url" | "payment_status" | "status">
+    | null;
+  const alreadyPaid =
+    clean(invoice?.payment_status).toLowerCase() === "paid" || clean(invoice?.status).toLowerCase() === "paid";
   const amountPaid = invoice ? Math.max(toNumber(invoice.total) ?? 0, toNumber(invoice.amount_paid) ?? 0) : null;
 
   const updates: Record<string, unknown> = {
@@ -243,6 +250,11 @@ async function markInvoicePaid(invoiceId: string, latestCheckoutUrl: string | nu
   await (supabase.from("invoices") as any)
     .update(updates)
     .eq("id", invoiceId);
+
+  return {
+    publicId: clean(invoice?.public_id) || null,
+    changed: !alreadyPaid,
+  };
 }
 
 async function getInvoiceLineItems(invoice: InvoiceRecord) {
@@ -723,6 +735,88 @@ function buildInvoiceEmailText(invoice: InvoiceDetails) {
   ].join("\n");
 }
 
+function buildPaymentNotificationHtml(invoice: InvoiceDetails, provider: string) {
+  return `
+    <div style="margin:0;padding:32px;background:#edf4fb;font-family:Segoe UI,Tahoma,sans-serif;color:#10203a;">
+      <div style="max-width:680px;margin:0 auto;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #d6deec;">
+        <div style="padding:28px 32px;background:linear-gradient(135deg,#18253d,#2c68c9);color:#ffffff;">
+          <div style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;opacity:0.74;">Payment received</div>
+          <div style="font-size:32px;font-weight:800;letter-spacing:-0.04em;margin-top:8px;">${escapeHtml(invoice.invoice_number)}</div>
+          <div style="margin-top:8px;font-size:16px;opacity:0.82;">${escapeHtml(invoice.customer_name)} paid ${escapeHtml(
+            formatMoney(invoice.total, invoice.currency),
+          )} through ${escapeHtml(provider)}.</div>
+        </div>
+        <div style="padding:28px 32px;">
+          <div style="display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;">
+            <div>
+              <div style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:#60708c;">Customer</div>
+              <div style="font-size:22px;font-weight:800;color:#10203a;margin-top:10px;">${escapeHtml(invoice.customer_name)}</div>
+            </div>
+            <div>
+              <div style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:#60708c;">Amount</div>
+              <div style="font-size:22px;font-weight:800;color:#2c68c9;margin-top:10px;">${escapeHtml(
+                formatMoney(invoice.total, invoice.currency),
+              )}</div>
+            </div>
+          </div>
+          <div style="margin-top:24px;display:grid;gap:10px;color:#60708c;">
+            <div><strong style="color:#10203a;">Invoice:</strong> ${escapeHtml(invoice.invoice_number)}</div>
+            <div><strong style="color:#10203a;">Paid status:</strong> ${escapeHtml(invoice.payment_status)}</div>
+            ${invoice.customer_email ? `<div><strong style="color:#10203a;">Customer email:</strong> ${escapeHtml(invoice.customer_email)}</div>` : ""}
+          </div>
+          ${
+            invoice.public_url
+              ? `<div style="margin-top:24px;">
+                  <a href="${escapeHtml(invoice.public_url)}" style="display:inline-block;padding:14px 24px;border-radius:999px;background:linear-gradient(135deg,#2c68c9,#15428e);color:#ffffff;font-weight:700;text-decoration:none;">
+                    View payment page
+                  </a>
+                </div>`
+              : ""
+          }
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function buildPaymentNotificationText(invoice: InvoiceDetails, provider: string) {
+  return [
+    `Payment received for ${invoice.invoice_number}.`,
+    "",
+    `Customer: ${invoice.customer_name}`,
+    `Amount: ${formatMoney(invoice.total, invoice.currency)}`,
+    `Provider: ${provider}`,
+    `Status: ${invoice.payment_status}`,
+    ...(invoice.customer_email ? [`Customer email: ${invoice.customer_email}`] : []),
+    ...(invoice.public_url ? ["", `View payment page: ${invoice.public_url}`] : []),
+  ].join("\n");
+}
+
+async function sendPaymentNotification(publicId: string, provider: string) {
+  const invoice = await getInvoiceByPublicId(publicId);
+  if (!invoice) return;
+
+  const resendKey = clean(process.env.RESEND_API_KEY);
+  const from = clean(process.env.INVOICE_FROM_EMAIL);
+  const recipient = clean(process.env.PAYMENT_NOTIFICATION_EMAIL) || clean(invoice.business.company_email);
+  if (!resendKey || !from || !recipient) return;
+
+  const resend = new Resend(resendKey);
+  const subject = `Payment received for ${invoice.invoice_number}`;
+
+  try {
+    await resend.emails.send({
+      from,
+      to: recipient,
+      subject,
+      html: buildPaymentNotificationHtml(invoice, provider),
+      text: buildPaymentNotificationText(invoice, provider),
+    });
+  } catch (error) {
+    console.error("Failed to send payment notification", error);
+  }
+}
+
 async function logInvoiceEmailDelivery(payload: {
   invoiceId: string;
   recipientEmail: string;
@@ -995,7 +1089,10 @@ export async function recordStripeWebhookEvent(event: Stripe.Event) {
   await insertPaymentEvent(paymentEvent);
 
   if (event.type === "checkout.session.completed" && invoiceId) {
-    await markInvoicePaid(invoiceId, session.url || null);
+    const result = await markInvoicePaid(invoiceId, session.url || null);
+    if (result.changed && result.publicId) {
+      await sendPaymentNotification(result.publicId, "Stripe");
+    }
   }
 }
 
@@ -1011,7 +1108,10 @@ export async function recordPayPalOrderCapture(publicId: string, order: PayPalOr
   });
 
   if (invoiceId) {
-    await markInvoicePaid(invoiceId);
+    const result = await markInvoicePaid(invoiceId);
+    if (result.changed && result.publicId) {
+      await sendPaymentNotification(result.publicId, "PayPal");
+    }
   }
 }
 
@@ -1028,6 +1128,9 @@ export async function recordPayPalWebhookEvent(event: PayPalWebhookEvent) {
   });
 
   if (event.event_type === "PAYMENT.CAPTURE.COMPLETED" && invoiceId) {
-    await markInvoicePaid(invoiceId);
+    const result = await markInvoicePaid(invoiceId);
+    if (result.changed && result.publicId) {
+      await sendPaymentNotification(result.publicId, "PayPal");
+    }
   }
 }
