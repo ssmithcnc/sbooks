@@ -17,6 +17,18 @@ with the project root set to `hosted-payments/`.
 3. Add the environment variables from `.env.example`.
 4. Deploy.
 
+### S-Books Online
+
+The read-only online books application is served from `/books` in this same
+Vercel project. Add these variables in both the Preview and Production
+environments, then deploy again:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+
+Use the Supabase publishable key only. Do not expose `SUPABASE_SECRET_KEY` or
+any service-role key to the browser.
+
 ## Next implementation steps
 
 - apply `supabase/schema.sql` in the Supabase SQL editor

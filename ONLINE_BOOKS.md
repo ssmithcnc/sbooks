@@ -9,7 +9,7 @@ Backups and online sync have independent on/off controls.
 
 1. Apply `supabase/online-books.sql` in the sbooks-prod SQL Editor. The SQL adds
    books_workspaces, books_members, books_records, three restricted RPCs, and RLS.
-2. Deploy the updated hosted-payments app using its existing deployment process.
+2. Deploy the updated hosted-payments app through its existing Vercel project.
    Supply NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.
    The `/books` client uses the public key plus the signed-in user's session,
    never a secret/service key. Keep email confirmation enabled in Supabase Auth.
@@ -23,20 +23,22 @@ Backups and online sync have independent on/off controls.
    before recording success. Then enable automatic sync (checks every minute while
    the server runs). Refresh `/books` to see the confirmed copy.
 
-## Deploy to Render
+## Deploy to Vercel
 
-The online app is a Next.js web service. Supabase remains the database and
-authentication provider; Render only serves the web app.
+The online S-Books view shares the existing Vercel-hosted payments application
+at `/books`. Supabase remains the database and authentication provider.
 
-1. In Render, select **New +** then **Blueprint** and connect this GitHub repo.
-   Render reads `render.yaml` from the repository root and creates
-   `sbooks-online` with `hosted-payments` as its root directory.
-2. When Render requests them, supply the project URL and publishable key from
-   Supabase for `NEXT_PUBLIC_SUPABASE_URL` and
-   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
-3. After the first deployment, add the Render URL (for example,
-   `https://sbooks-online.onrender.com`) to Supabase Auth's allowed redirect
-   URLs, then redeploy once.
+1. Open the existing S-Books Hosted Payments project in Vercel. Confirm its
+   Root Directory is `hosted-payments`.
+2. In Settings > Environment Variables, add the Supabase project URL and
+   publishable key as `NEXT_PUBLIC_SUPABASE_URL` and
+   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Add them to both Preview and
+   Production. Do not add a Supabase secret or service-role key for `/books`.
+3. Push or create a preview from `codex/payment-foundation`, verify `/books`,
+   then promote that Vercel deployment to Production (or merge the branch into
+   the configured production branch).
+4. In Supabase Auth > URL Configuration, set the Vercel production URL ending
+   in `/books` as the Site URL and an allowed Redirect URL.
 
 The app intentionally needs no Supabase service-role key. The browser uses the
 publishable key and the database's row-level security policies limit every
