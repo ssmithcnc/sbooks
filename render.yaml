@@ -2,6 +2,7 @@ services:
   - type: web
     name: sbooks-online
     runtime: node
+    region: ohio
     rootDir: hosted-payments
     buildCommand: npm ci && npm run build
     startCommand: npm start -- -p $PORT
