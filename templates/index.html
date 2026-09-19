@@ -4,10 +4,16 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{{ title }}</title>
+  <script>
+    document.documentElement.dataset.theme = localStorage.getItem("sbooksTheme") || "dark";
+  </script>
   <link rel="stylesheet" href="/static/style.css"/>
   <link rel="icon" type="image/png" href="/static/sbooks-brand-badge.png"/>
 </head>
-<body>
+<body class="cashflow-page">
+  <script>
+    if (localStorage.getItem("sbooksCashflowMenuCollapsed") === "1") document.body.classList.add("business-menu-collapsed");
+  </script>
   <header class="topbar">
     <div class="brand">
       <img class="product-seal" src="/static/sbooks-brand-badge.png" alt="S-Books"/>
@@ -23,18 +29,31 @@
       </label>
     </div>
     <div class="actions">
+      <button class="btn theme-toggle" id="themeToggle" type="button" aria-label="Switch theme">Light Mode</button>
       <a class="btn" href="/business">Business Books</a>
       <button class="btn" id="btnRefresh">Refresh</button>
-      <button class="btn" id="btnSetup">Setup / Paychecks</button>
-      <button class="btn" id="btnAddTx">Add Transaction</button>
-      <button class="btn" id="btnAddRule">Add Recurring Rule
-        <button id='exportSheetsBtn'>Export Sheets</button></button>
-      <button class="btn" id="btnCC">CC Snapshots</button>
-      <button class="btn" id="btnArchives">Archives</button>
     </div>
   </header>
 
-  <main class="container">
+  <main class="container business-layout">
+    <aside class="business-menu" aria-label="Cashflow menu">
+      <button class="business-menu-toggle" id="cashflowMenuToggle" type="button" aria-label="Collapse cashflow menu" aria-expanded="true" title="Toggle cashflow menu">
+        <span class="business-menu-toggle-icon" aria-hidden="true">|||</span><span class="business-menu-toggle-text">Cashflow Menu</span>
+      </button>
+      <div class="business-menu-brand">
+        <img class="business-menu-logo" src="/static/sbooks-brand-badge.png" alt="" />
+        <div class="business-menu-brand-text"><b>S-Books</b><span>Cashflow Planner</span></div>
+      </div>
+      <div class="business-menu-title">Main Menu</div>
+      <a class="business-menu-link active" href="#periods" title="Cashflow Planner" aria-current="page"><span class="business-menu-icon" aria-hidden="true">CF</span><span class="business-menu-label">Cashflow Planner</span></a>
+      <button class="business-menu-link" id="btnSetup" title="Setup / Paychecks"><span class="business-menu-icon" aria-hidden="true">SP</span><span class="business-menu-label">Setup / Paychecks</span></button>
+      <button class="business-menu-link" id="btnAddTx" title="Add Transaction"><span class="business-menu-icon" aria-hidden="true">TX</span><span class="business-menu-label">Add Transaction</span></button>
+      <button class="business-menu-link" id="btnAddRule" title="Recurring Rules"><span class="business-menu-icon" aria-hidden="true">RR</span><span class="business-menu-label">Recurring Rules</span></button>
+      <button class="business-menu-link" id="btnCC" title="CC Snapshots"><span class="business-menu-icon" aria-hidden="true">CC</span><span class="business-menu-label">CC Snapshots</span></button>
+      <button class="business-menu-link" id="btnArchives" title="Archives"><span class="business-menu-icon" aria-hidden="true">AR</span><span class="business-menu-label">Archives</span></button>
+      <button class="business-menu-link" id="exportSheetsBtn" title="Export Sheets"><span class="business-menu-icon" aria-hidden="true">EX</span><span class="business-menu-label">Export Sheets</span></button>
+    </aside>
+    <div class="business-content">
     <section class="panel" id="statusPanel">
       <div class="panel-row">
         <div><b>Rule:</b> Due day <b>1–15</b> = “1st-of-month” bills. Due day <b>16–EOM</b> = “mid-month” bills.</div>
@@ -50,6 +69,7 @@
       </div>
       <div class="periods" id="periods"></div>
     </section>
+    </div>
   </main>
 
   <div class="modal-backdrop hidden" id="modalBackdrop" onclick="if(event.target && event.target.id==='modalBackdrop'){document.getElementById('modalBackdrop').classList.add('hidden')}">
@@ -66,13 +86,15 @@
   <script src="/static/app.js"></script>
 
 <!-- Calculator Widget -->
-<div id="calcWidget" class="calc-widget">
+<div id="calcWidget" class="calc-widget" role="region" aria-label="Calculator" tabindex="-1">
   <div id="calcHeader" class="calc-header">
     Calculator
-    <button id="calcMinBtn">_</button>
+    <button id="calcMinBtn" type="button" aria-label="Minimize calculator" title="Minimize calculator">_</button>
   </div>
   <div class="calc-body">
-    <input id="calcDisplay" type="text" readonly />
+    <input id="calcDisplay" type="text" aria-label="Calculator display" readonly />
+    <button id="calcCopy" class="btn" type="button" title="Copy result">Copy result</button>
+    <span id="calcCopyStatus" class="muted" role="status"></span>
     <div class="calc-buttons">
       <button>7</button><button>8</button><button>9</button><button>/</button>
       <button>4</button><button>5</button><button>6</button><button>*</button>

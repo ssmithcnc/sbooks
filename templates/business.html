@@ -4,10 +4,18 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{{ title }}</title>
+  <script>
+    document.documentElement.dataset.theme = localStorage.getItem("sbooksTheme") || "dark";
+  </script>
   <link rel="stylesheet" href="/static/style.css"/>
   <link rel="icon" type="image/png" href="/static/sbooks-brand-badge.png"/>
 </head>
 <body>
+  <script>
+    if (localStorage.getItem("sbooksBusinessMenuCollapsed") === "1") {
+      document.body.classList.add("business-menu-collapsed");
+    }
+  </script>
   <header class="topbar">
     <div class="brand">
       <img class="product-seal" src="/static/sbooks-brand-badge.png" alt="S-Books"/>
@@ -17,20 +25,51 @@
       </div>
     </div>
     <div class="actions">
+      <button class="btn theme-toggle" id="themeToggle" type="button" aria-label="Switch theme">Light Mode</button>
       <a class="btn btn-secondary" href="/">Cashflow Planner</a>
       <a class="btn btn-secondary" id="receiptPortalBtn" href="https://project-rzdrv.vercel.app/receipts/upload" target="_blank" rel="noopener">Receipt Portal</a>
       <button class="btn" id="refreshBusinessBtn" type="button">Refresh</button>
     </div>
   </header>
 
-  <main class="container business-shell">
-    <section class="panel">
+  <main class="container business-layout" data-active-business-page="{{ active_business_page or 'profile' }}">
+    <aside class="business-menu" id="businessMenu" aria-label="Business pages">
+      <button class="business-menu-toggle" id="businessMenuToggle" type="button" aria-label="Collapse business menu" aria-expanded="true">
+        <span class="business-menu-toggle-icon" aria-hidden="true">|||</span>
+        <span class="business-menu-toggle-text">Business Menu</span>
+      </button>
+      <div class="business-menu-brand">
+        <img class="business-menu-logo" src="/static/sbooks-brand-badge.png" alt="S-Books"/>
+        <div class="business-menu-brand-text">
+          <b>S-Books</b>
+          <span>Business Books</span>
+        </div>
+      </div>
+      <div class="business-menu-title">Main Menu</div>
+      {% for page in business_pages %}
+      <a class="business-menu-link{% if page.key == active_business_page %} active{% endif %}" href="{{ page.path }}" title="{{ page.label }}">
+        <span class="business-menu-icon" aria-hidden="true">{{ page.icon }}</span>
+        <span class="business-menu-label">{{ page.label }}</span>
+      </a>
+      {% endfor %}
+    </aside>
+    <div class="business-content">
+    <section class="panel business-page-panel{% if active_business_page != 'profile' %} business-page-hidden{% endif %}" data-business-page="profile">
       <div class="panel-row">
         <div>
           <b>Business Profile</b>
           <div class="muted">Used for document numbering, defaults, and PDF branding.</div>
         </div>
         <div id="businessStatus" class="muted"></div>
+      </div>
+      <div class="business-form">
+        <b>Cloud Backup</b>
+        <label class="checkboxline"><input type="checkbox" id="cloudBackupEnabled" />Automatic cloud backups</label>
+        <div id="cloudBackupStatus" role="status" class="muted">Checking backup status...</div>
+        <div class="form-actions">
+          <button type="button" class="btn" id="cloudBackupNow">Back up now</button>
+          <a class="btn" href="/api/cloud_backup/download" id="cloudBackupDownload" hidden>Download verified backup</a>
+        </div>
       </div>
       <form id="settingsForm" class="business-form business-form-3">
         <label>Company name
@@ -162,7 +201,7 @@
       </form>
     </section>
 
-    <section class="panel">
+    <section class="panel business-page-panel{% if active_business_page != 'import' %} business-page-hidden{% endif %}" data-business-page="import">
       <div class="panel-row">
         <div>
           <b>QuickBooks Import</b>
@@ -192,7 +231,7 @@
       <div id="importErrors" class="import-messages badtext"></div>
     </section>
 
-    <section class="business-grid">
+    <section class="business-page-panel{% if active_business_page != 'customers' %} business-page-hidden{% endif %}" data-business-page="customers">
       <section class="panel">
         <div class="panel-row">
           <div>
@@ -234,6 +273,9 @@
         </div>
       </section>
 
+    </section>
+
+    <section class="business-page-panel{% if active_business_page != 'products' %} business-page-hidden{% endif %}" data-business-page="products">
       <section class="panel">
         <div class="panel-row">
           <div>
@@ -274,7 +316,7 @@
       </section>
     </section>
 
-    <section class="panel">
+    <section class="panel business-page-panel{% if active_business_page != 'document-editor' %} business-page-hidden{% endif %}" data-business-page="document-editor">
       <div class="panel-row">
         <div>
           <b>Estimate / Invoice Editor</b>
@@ -311,6 +353,9 @@
         </label>
         <label>Tax rate (%)
           <input type="number" step="0.01" name="tax_rate" />
+        </label>
+        <label class="invoice-only">Payments received
+          <input type="number" step="0.01" min="0" name="amount_paid" placeholder="0.00" />
         </label>
         <label class="full">Notes
           <textarea name="notes" rows="3"></textarea>
@@ -388,7 +433,7 @@
       </form>
     </section>
 
-    <section class="panel">
+    <section class="panel business-page-panel{% if active_business_page != 'invoice-reports' %} business-page-hidden{% endif %}" data-business-page="invoice-reports">
       <div class="panel-row">
         <div>
           <b>Invoice Reports</b>
@@ -411,7 +456,7 @@
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel business-page-panel{% if active_business_page != 'documents' %} business-page-hidden{% endif %}" data-business-page="documents">
       <div class="panel-row">
         <div>
           <b>Documents</b>
@@ -428,18 +473,18 @@
       </div>
     </section>
 
-    <section class="panel hidden" id="emailComposerPanel">
+    <section class="panel business-page-panel{% if active_business_page != 'communications' %} business-page-hidden{% endif %} hidden" id="emailComposerPanel" data-business-page="communications">
       <div class="panel-row">
         <div>
-          <b>Invoice Email Review & Send</b>
-          <div class="muted" id="emailComposerMeta">Load an invoice to review the email, change the recipient, and send the PDF attachment.</div>
+          <b>Document Email Review & Send</b>
+          <div class="muted" id="emailComposerMeta">Load an invoice or estimate to review the email, change recipients, and send the PDF attachment.</div>
         </div>
         <div class="form-actions">
           <a class="btn btn-secondary" id="emailPaymentLink" target="_blank" rel="noopener" href="#">Open Payment Page</a>
           <button class="btn btn-secondary" type="button" id="refreshEmailDraftBtn">Reload Draft</button>
           <button class="btn btn-secondary" type="button" id="friendlyReminderBtn">Friendly Reminder</button>
           <button class="btn btn-secondary" type="button" id="seriousReminderBtn">Serious Reminder</button>
-          <button class="btn" type="button" id="sendInvoiceEmailBtn">Send Invoice Email</button>
+          <button class="btn" type="button" id="sendInvoiceEmailBtn">Send Email</button>
         </div>
       </div>
       <form id="emailComposerForm" class="business-form business-form-2">
@@ -447,8 +492,15 @@
         <label>Send to
           <input type="email" name="to" placeholder="customer@example.com" />
         </label>
+        <label>CC
+          <input type="text" name="cc" placeholder="name@example.com, other@example.com" />
+        </label>
         <label>Subject
           <input type="text" name="subject" />
+        </label>
+        <label class="checkboxline inline-check">
+          <input type="checkbox" name="send_copy" checked />
+          <span>Send me a copy at steve@cncpowder.com</span>
         </label>
         <label class="full">HTML email body
           <textarea name="html" rows="16"></textarea>
@@ -465,7 +517,7 @@
       <div id="emailPreview" class="email-preview"></div>
     </section>
 
-    <section class="panel hidden" id="smsComposerPanel">
+    <section class="panel business-page-panel{% if active_business_page != 'communications' %} business-page-hidden{% endif %} hidden" id="smsComposerPanel" data-business-page="communications">
       <div class="panel-row">
         <div>
           <b>Invoice Text Message</b>
@@ -492,6 +544,15 @@
       </form>
       <div id="smsSendStatus" class="muted" style="margin-top:10px;"></div>
     </section>
+    <section class="panel business-page-panel{% if active_business_page != 'communications' %} business-page-hidden{% endif %}" data-business-page="communications" id="communicationsEmptyPanel">
+      <div class="panel-row">
+        <div>
+          <b>Email & SMS</b>
+          <div class="muted">Open a document from the Documents page to review and send email or text messages.</div>
+        </div>
+      </div>
+    </section>
+    </div>
   </main>
 
   <script src="/static/business.js"></script>

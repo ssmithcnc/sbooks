@@ -15,7 +15,7 @@
         <div style="width:38px;height:38px;border-radius:13px;background:linear-gradient(145deg,#74ddff 0%,#4d9dff 55%,#245cff 100%);display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;color:#ffffff;">S</div>
         {% endif %}
         <div style="display:flex;align-items:center;min-height:80px;">
-          <div style="font-size:19px;font-weight:600;opacity:.86;line-height:1.2;">Invoice delivery and payment</div>
+          <div style="font-size:19px;font-weight:600;opacity:.86;line-height:1.2;">{{ document.type|title }} delivery{% if document.type == "invoice" %} and payment{% endif %}</div>
         </div>
       </div>
     </div>
@@ -23,7 +23,7 @@
     <div style="background:#ffffff;border:1px solid #d7e1eb;border-radius:22px;padding:28px;margin-top:18px;">
       <div style="display:flex;justify-content:space-between;gap:20px;align-items:flex-start;flex-wrap:wrap;">
         <div style="flex:1 1 320px;min-width:260px;">
-          <div style="font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#63748a;margin-bottom:10px;">Invoice Ready</div>
+          <div style="font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#63748a;margin-bottom:10px;">{{ document.type|title }} Ready</div>
           <h1 style="margin:0;font-size:30px;line-height:1.05;color:#102238;">{{ document.number }}</h1>
           <div style="margin-top:10px;font-size:15px;color:#5f7084;">For {{ document.customer.name }}</div>
         </div>
@@ -39,8 +39,11 @@
       <div style="margin-top:24px;background:#f4f8fc;border:1px solid #d9e6f2;border-radius:18px;padding:18px 20px;">
         <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
           <div>
-            <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#63748a;">Amount Due</div>
-            <div style="font-size:34px;font-weight:800;color:#1f5fbf;margin-top:6px;">${{ '%.2f'|format(document.total) }}</div>
+            <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#63748a;">{% if document.type == "estimate" %}Estimate Total{% else %}Balance Due{% endif %}</div>
+            <div style="font-size:34px;font-weight:800;color:#1f5fbf;margin-top:6px;">${{ '%.2f'|format(document.balance_due if document.type == "invoice" else document.total) }}</div>
+            {% if document.type == "invoice" and document.amount_paid %}
+            <div style="font-size:13px;color:#63748a;margin-top:6px;">${{ '%.2f'|format(document.amount_paid) }} already received</div>
+            {% endif %}
           </div>
           <div style="min-width:220px;">
             <div style="font-size:14px;color:#36485c;"><strong>Issue date:</strong> {{ document.issue_date }}</div>
@@ -49,13 +52,16 @@
         </div>
       </div>
 
+      {% if payment_url %}
       <div style="margin-top:26px;">
-        <a href="{{ payment_url }}" style="display:inline-block;background:#1f5fbf;color:#ffffff;text-decoration:none;padding:14px 24px;border-radius:999px;font-weight:700;">Pay Invoice Online</a>
+        <a href="{{ payment_url }}" style="display:inline-block;background:#1f5fbf;color:#ffffff;text-decoration:none;padding:14px 24px;border-radius:999px;font-weight:700;">{{ action_label or "Open Link" }}</a>
       </div>
+      {% endif %}
 
       <div style="margin-top:18px;font-size:13px;color:#63748a;line-height:1.6;">
-        The invoice PDF is attached for your records.<br>
-        Payment page: <a href="{{ payment_url }}" style="color:#1f5fbf;">{{ payment_url }}</a>
+        The {{ attachment_label or document.type }} PDF is attached for your records.
+        {% if payment_url %}<br>
+        {% if document.type == "estimate" %}Acceptance page{% else %}Payment page{% endif %}: <a href="{{ payment_url }}" style="color:#1f5fbf;">{{ payment_url }}</a>{% endif %}
       </div>
 
       <div style="margin-top:28px;font-size:15px;line-height:1.7;color:#1c2b3d;">{{ closing_html|safe }}</div>

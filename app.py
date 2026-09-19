@@ -16,7 +16,7 @@ import uuid
 import zipfile
 from datetime import date, datetime, timedelta
 from email.message import EmailMessage
-from email.utils import formataddr
+from email.utils import formataddr, getaddresses
 from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib import error as urlerror
@@ -30,6 +30,7 @@ from db import init_db, db
 APP_TITLE = "S-Books"
 FIRST_OF_MONTH_MAX_DAY = 15
 SBOOKS_BRAND_ASSET = Path("static") / "sbooks-brand-badge.png"
+DEFAULT_EMAIL_COPY_TO = "steve@cncpowder.com"
 
 def iso(d: date) -> str:
   return d.isoformat()
@@ -381,6 +382,15 @@ def calculate_document_totals(lines: list[dict], tax_rate: float) -> tuple[float
   return subtotal, tax_amount, total
 
 
+def document_amount_paid(document: dict) -> float:
+  return round(max(parse_float(document.get("amount_paid"), 0.0), 0.0), 2)
+
+
+def document_balance_due(document: dict) -> float:
+  total = round(parse_float(document.get("total"), 0.0), 2)
+  return round(max(total - document_amount_paid(document), 0.0), 2)
+
+
 def format_currency(amount: float) -> str:
   return f"${round(float(amount or 0), 2):,.2f}"
 
@@ -574,6 +584,8 @@ def fetch_document(conn, document_id: int):
     "tax_rate": float(doc["tax_rate"] or 0),
     "tax_amount": float(doc["tax_amount"] or 0),
     "total": float(doc["total"] or 0),
+    "amount_paid": round(float(doc_value("amount_paid", 0) or 0), 2),
+    "balance_due": round(max(float(doc["total"] or 0) - float(doc_value("amount_paid", 0) or 0), 0), 2),
     "notes": doc["notes"],
     "terms": doc["terms"],
     "imported": bool(doc["imported"]),
@@ -679,12 +691,19 @@ def build_document_payload(conn, payload: dict, existing: dict | None = None) ->
   settings = business_settings_dict(conn)
   tax_rate = parse_float(payload.get("tax_rate"), parse_float((existing or {}).get("tax_rate"), parse_float(settings.get("default_tax_rate", "0"))))
   subtotal, tax_amount, total = calculate_document_totals(lines, tax_rate)
+  amount_paid = 0.0
+  if doc_type == "invoice":
+    amount_paid = round(max(parse_float(payload.get("amount_paid", (existing or {}).get("amount_paid")), 0.0), 0.0), 2)
+    if amount_paid > total:
+      amount_paid = total
   status = clean_text(payload.get("status") or (existing or {}).get("status") or ("draft" if doc_type == "estimate" else "draft"))
   accepted_at = clean_text((existing or {}).get("accepted_at")) or None
   if doc_type == "estimate":
     status = "accepted" if accepted_at else "draft"
   elif status not in {"draft", "open", "paid"}:
     status = "draft"
+  if doc_type == "invoice" and status == "paid":
+    amount_paid = total
 
   number = clean_text(payload.get("number") or (existing or {}).get("number"))
   if not number:
@@ -732,6 +751,7 @@ def build_document_payload(conn, payload: dict, existing: dict | None = None) ->
     "tax_rate": tax_rate,
     "tax_amount": tax_amount,
     "total": total,
+    "amount_paid": amount_paid,
     "notes": clean_text(payload.get("notes") or (existing or {}).get("notes")),
     "terms": clean_text(payload.get("terms") or (existing or {}).get("terms") or settings.get("default_terms", "")),
     "imported": int(bool(payload.get("imported", (existing or {}).get("imported", False)))),
@@ -774,6 +794,7 @@ def save_document(conn, payload: dict, document_id: int | None = None) -> int:
     "tax_rate": doc["tax_rate"],
     "tax_amount": doc["tax_amount"],
     "total": doc["total"],
+    "amount_paid": doc["amount_paid"],
     "notes": doc["notes"],
     "terms": doc["terms"],
     "imported": doc["imported"],
@@ -1315,8 +1336,9 @@ def render_document_pdf(document: dict, settings: dict) -> bytes:
   canvas.rect(left, y - 70, right - left, 70, fill_gray=0.94)
   canvas.text(left + 18, y - 24, 15, f"{document['type'].title()}", font="F2")
   canvas.text(left + 18, y - 43, 11, f"{document['number']}")
+  amount_due = document_balance_due(document) if document.get("type") == "invoice" else round(float(document.get("total") or 0), 2)
   canvas.text(right - 110, y - 42, 9, "AMOUNT DUE")
-  canvas.text(right - 132, y - 62, 20, f"${document['total']:,.2f}", font="F2")
+  canvas.text(right - 132, y - 62, 20, f"${amount_due:,.2f}", font="F2")
   y -= 86
 
   gap = 16
@@ -1386,13 +1408,21 @@ def render_document_pdf(document: dict, settings: dict) -> bytes:
       canvas.text(terms_x + 12, inner_y, 9, term_line)
       inner_y -= 10
 
-  canvas.rect(totals_x, section_top - 82, 190, 82)
-  line_y = section_top - 18
-  for label, value, bold in [
+  totals_rows = [
     ("Subtotal", document["subtotal"], False),
     (f"Tax ({document['tax_rate']:.2f}%)", document["tax_amount"], False),
-    ("Total", document["total"], True),
-  ]:
+  ]
+  if document.get("type") == "invoice":
+    totals_rows.append(("Total", document["total"], False))
+    if document_amount_paid(document) > 0:
+      totals_rows.append(("Payments received", -document_amount_paid(document), False))
+    totals_rows.append(("Balance Due", amount_due, True))
+  else:
+    totals_rows.append(("Total", amount_due, True))
+  totals_h = 20 + (len(totals_rows) * 18)
+  canvas.rect(totals_x, section_top - totals_h, 190, totals_h)
+  line_y = section_top - 18
+  for label, value, bold in totals_rows:
     canvas.text(totals_x + 12, line_y, 10 if bold else 9, label, font="F2" if bold else "F1")
     canvas.text(totals_x + 116, line_y, 10 if bold else 9, f"${value:,.2f}", font="F2" if bold else "F1")
     line_y -= 18
@@ -1785,9 +1815,13 @@ def publish_invoice_to_hosted_payments(conn, document: dict, settings: dict) -> 
     "subtotal": round(float(document.get("subtotal") or 0), 2),
     "tax_amount": round(float(document.get("tax_amount") or 0), 2),
     "total": round(float(document.get("total") or 0), 2),
-    "amount_paid": round(float(document.get("total") or 0), 2) if document.get("status") == "paid" else 0,
+    "amount_paid": (
+      round(float(document.get("total") or 0), 2)
+      if document.get("status") == "paid"
+      else document_amount_paid(document)
+    ),
     "status": "paid" if document.get("status") == "paid" else "open",
-    "payment_status": "paid" if document.get("status") == "paid" else "unpaid",
+    "payment_status": "paid" if document.get("status") == "paid" else ("partial" if document_amount_paid(document) > 0 else "unpaid"),
     "payment_page_url": payment_page_url,
     "source_estimate_public_id": source_estimate_public_id,
     "metadata": {
@@ -2111,7 +2145,9 @@ def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] |
   if not supabase_is_configured(settings):
     return {"updated": 0, "checked": 0, "updated_documents": []}
 
-  query = """SELECT id, number, status, cloud_public_id, payment_url
+  available = document_table_columns(conn)
+  amount_paid_select = "amount_paid" if "amount_paid" in available else "0 AS amount_paid"
+  query = f"""SELECT id, number, status, cloud_public_id, payment_url, {amount_paid_select}
              FROM documents
              WHERE type='invoice' AND cloud_public_id IS NOT NULL AND cloud_public_id != ''"""
   params = []
@@ -2132,7 +2168,7 @@ def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] |
     settings,
     "invoices",
     query={
-      "select": "public_id,payment_status,status,payment_page_url,updated_at",
+      "select": "public_id,payment_status,status,payment_page_url,amount_paid,total,updated_at",
       "public_id": f"in.({','.join(public_ids)})",
     },
   ) or []
@@ -2145,7 +2181,6 @@ def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] |
   updated = 0
   checked = 0
   updated_documents = []
-  available = document_table_columns(conn)
   for row in rows:
     public_id = clean_text(row["cloud_public_id"])
     remote = remote_by_public_id.get(public_id)
@@ -2162,6 +2197,12 @@ def sync_hosted_payment_statuses(conn, settings: dict, document_ids: list[int] |
       updates["cloud_sync_status"] = desired_sync_status
     if "cloud_synced_at" in available:
       updates["cloud_synced_at"] = now_iso()
+    local_amount_paid = round(float(row["amount_paid"] or 0), 2)
+    remote_amount_paid = round(max(parse_float(remote.get("amount_paid"), 0.0), 0.0), 2)
+    if remote_payment_status == "paid" and remote_amount_paid <= 0:
+      remote_amount_paid = round(max(parse_float(remote.get("total"), 0.0), 0.0), 2)
+    if "amount_paid" in available and remote_amount_paid > local_amount_paid:
+      updates["amount_paid"] = remote_amount_paid
     remote_status = local_status
     if remote_payment_status == "paid" and local_status != "paid":
       updates["status"] = "paid"
@@ -2472,26 +2513,45 @@ def accept_estimate_quote(conn, estimate: dict, settings: dict, accepted_by_name
 
 
 def build_invoice_email_draft(document: dict, settings: dict) -> dict:
-  payment_url = build_payment_url(document, settings)
+  is_estimate = document.get("type") == "estimate"
+  payment_url = build_estimate_acceptance_url(document, settings) if is_estimate else build_payment_url(document, settings)
   recipient_name = document["customer"].get("contact_name") or document["customer"]["name"]
-  intro_text = (
-    f"Hi {recipient_name},\n\n"
-    f"Your invoice {document['number']} from {settings.get('company_name') or APP_TITLE} is ready. "
-    f"I've attached the PDF for your records."
-  )
-  due_line = (
-    f"Due date: {document['due_date']}"
-    if document.get("due_date")
-    else "Due date: On receipt"
-  )
-  due_label = "Due date"
-  due_value = document.get("due_date") or "On receipt"
-  closing_text = (
-    f"Questions? Reply to this email or call {settings.get('company_phone') or 'our office'}.\n\n"
-    f"Thank you,\n{settings.get('company_name') or APP_TITLE}"
-  )
-  subject = f"Invoice {document['number']} from {settings.get('company_name') or APP_TITLE}"
+  company_name = settings.get("company_name") or APP_TITLE
+  if is_estimate:
+    intro_text = (
+      f"Hi {recipient_name},\n\n"
+      f"Your estimate {document['number']} from {company_name} is ready. "
+      f"I've attached the PDF for your records."
+    )
+    due_line = "Estimate total"
+    due_label = "Estimate total"
+    due_value = f"${document['total']:,.2f}"
+    closing_text = (
+      f"Questions? Reply to this email or call {settings.get('company_phone') or 'our office'}.\n\n"
+      f"Thank you,\n{company_name}"
+    )
+    subject = f"Estimate {document['number']} from {company_name}"
+  else:
+    intro_text = (
+      f"Hi {recipient_name},\n\n"
+      f"Your invoice {document['number']} from {company_name} is ready. "
+      f"I've attached the PDF for your records."
+    )
+    due_line = (
+      f"Due date: {document['due_date']}"
+      if document.get("due_date")
+      else "Due date: On receipt"
+    )
+    due_label = "Due date"
+    due_value = document.get("due_date") or "On receipt"
+    closing_text = (
+      f"Questions? Reply to this email or call {settings.get('company_phone') or 'our office'}.\n\n"
+      f"Thank you,\n{company_name}"
+    )
+    subject = f"Invoice {document['number']} from {company_name}"
   company_logo_path = company_logo_file(settings)
+  action_label = "Review and Accept Estimate" if is_estimate and payment_url else "Pay Invoice Online"
+  attachment_label = "estimate" if is_estimate else "invoice"
   html_body = render_template(
     "invoice_email.html",
     title=subject,
@@ -2503,6 +2563,8 @@ def build_invoice_email_draft(document: dict, settings: dict) -> dict:
     due_line=due_line,
     due_label=due_label,
     due_value=due_value,
+    action_label=action_label,
+    attachment_label=attachment_label,
     logo_src="cid:company-logo" if company_logo_path else None,
     sbooks_logo_src="cid:sbooks-logo",
   )
@@ -2517,20 +2579,36 @@ def build_invoice_email_draft(document: dict, settings: dict) -> dict:
     due_line=due_line,
     due_label=due_label,
     due_value=due_value,
+    action_label=action_label,
+    attachment_label=attachment_label,
     logo_src=inline_logo_data_uri(settings.get("company_logo_path", "")),
     sbooks_logo_src=sbooks_brand_data_uri(),
   )
-  text_body = "\n".join([
+  text_lines = [
     intro_text,
     "",
-    f"Amount due: ${document['total']:,.2f}",
-    due_line,
-    f"Pay online: {payment_url}",
+    (
+      f"Estimate total: ${document['total']:,.2f}"
+      if is_estimate
+      else f"Balance due: ${document_balance_due(document):,.2f}"
+    ),
+  ]
+  if not is_estimate and document_amount_paid(document) > 0:
+    text_lines.append(f"Payments received: ${document_amount_paid(document):,.2f}")
+  if not is_estimate:
+    text_lines.append(due_line)
+  if payment_url:
+    text_lines.append(f"{'Review and accept' if is_estimate else 'Pay online'}: {payment_url}")
+  text_lines.extend([
     "",
     closing_text,
   ])
+  text_body = "\n".join(text_lines)
   return {
     "to": document["customer"].get("email") or "",
+    "cc": "",
+    "send_copy": True,
+    "copy_to": DEFAULT_EMAIL_COPY_TO,
     "subject": subject,
     "html": html_body,
     "preview_html": preview_html,
@@ -2569,7 +2647,7 @@ def build_invoice_reminder_draft(document: dict, settings: dict, tone: str = "fr
   recipient_name = document["customer"].get("contact_name") or document["customer"]["name"]
   company_name = settings.get("company_name") or APP_TITLE
   due = document_due_context(document)
-  amount_due = f"${document['total']:,.2f}"
+  amount_due = f"${document_balance_due(document):,.2f}"
 
   if tone == "serious":
     intro_text = (
@@ -2630,7 +2708,8 @@ def build_invoice_reminder_draft(document: dict, settings: dict, tone: str = "fr
   text_body = "\n".join([
     intro_text,
     "",
-    f"Amount due: {amount_due}",
+    f"Balance due: {amount_due}",
+    *([f"Payments received: ${document_amount_paid(document):,.2f}"] if document_amount_paid(document) > 0 else []),
     f"Due date: {due['due_value']}",
     f"Pay online: {payment_url}",
     "",
@@ -2654,13 +2733,13 @@ def build_invoice_sms_draft(document: dict, settings: dict, kind: str = "invoice
   payment_url = build_payment_url(document, settings)
   recipient_name = document["customer"].get("contact_name") or document["customer"]["name"]
   company_name = settings.get("company_name") or APP_TITLE
-  amount_due = f"${document['total']:,.2f}"
+  amount_due = f"${document_balance_due(document):,.2f}"
   due = document_due_context(document)
 
   if kind == "serious":
     message = (
       f"{recipient_name}, invoice {document['number']} from {company_name} is now past due. "
-      f"Amount due: {amount_due}. "
+      f"Balance due: {amount_due}. "
       f"Please pay as soon as possible or reply with payment timing. {payment_url}"
     )
   elif kind == "friendly":
@@ -2671,7 +2750,7 @@ def build_invoice_sms_draft(document: dict, settings: dict, kind: str = "invoice
   else:
     message = (
       f"{recipient_name}, your invoice {document['number']} from {company_name} is ready. "
-      f"Amount due: {amount_due}. "
+      f"Balance due: {amount_due}. "
       f"{'Due ' + str(due['due_value']) + '. ' if document.get('due_date') else ''}"
       f"Pay here: {payment_url}"
     )
@@ -2732,7 +2811,40 @@ def send_twilio_sms_message(settings: dict, to_phone: str, body: str):
   return data
 
 
-def send_invoice_email_message(settings: dict, to_email: str, subject: str, html_body: str, text_body: str, pdf_name: str, pdf_bytes: bytes, inline_images: list[dict] | None = None):
+def parse_email_recipients(value) -> list[str]:
+  if value in (None, ""):
+    return []
+  if isinstance(value, (list, tuple)):
+    raw = ", ".join(str(item or "") for item in value)
+  else:
+    raw = str(value)
+  recipients = []
+  seen = set()
+  for _, address in getaddresses([raw.replace(";", ",")]):
+    email_address = clean_text(address)
+    if not email_address or "@" not in email_address:
+      continue
+    key = email_address.lower()
+    if key in seen:
+      continue
+    seen.add(key)
+    recipients.append(email_address)
+  return recipients
+
+
+def send_invoice_email_message(
+  settings: dict,
+  to_email: str,
+  subject: str,
+  html_body: str,
+  text_body: str,
+  pdf_name: str,
+  pdf_bytes: bytes,
+  inline_images: list[dict] | None = None,
+  cc_emails=None,
+  bcc_emails=None,
+  document_label: str = "invoice",
+):
   smtp_host = clean_text(settings.get("smtp_host"))
   smtp_port = int(parse_float(settings.get("smtp_port"), 587))
   smtp_username = clean_text(settings.get("smtp_username"))
@@ -2740,21 +2852,34 @@ def send_invoice_email_message(settings: dict, to_email: str, subject: str, html
   company_email = clean_text(settings.get("company_email"))
   from_name = clean_text(settings.get("smtp_from_name")) or clean_text(settings.get("company_name")) or APP_TITLE
   from_email = company_email or smtp_username
+  to_recipients = parse_email_recipients(to_email)
+  cc_recipients = parse_email_recipients(cc_emails)
+  bcc_recipients = parse_email_recipients(bcc_emails)
+  all_recipients = []
+  seen_recipients = set()
+  for address in [*to_recipients, *cc_recipients, *bcc_recipients]:
+    key = address.lower()
+    if key in seen_recipients:
+      continue
+    seen_recipients.add(key)
+    all_recipients.append(address)
   if not smtp_host:
-    raise ValueError("SMTP host is required before sending invoice email")
+    raise ValueError(f"SMTP host is required before sending {document_label} email")
   if not from_email:
-    raise ValueError("Set company email before sending invoice email")
-  if not clean_text(to_email):
+    raise ValueError(f"Set company email before sending {document_label} email")
+  if not to_recipients:
     raise ValueError("Recipient email is required")
 
   msg = EmailMessage()
   msg["Subject"] = subject
   msg["From"] = formataddr((from_name, from_email))
-  msg["To"] = clean_text(to_email)
-  if company_email and company_email.lower() != clean_text(to_email).lower():
+  msg["To"] = ", ".join(to_recipients)
+  if cc_recipients:
+    msg["Cc"] = ", ".join(cc_recipients)
+  if company_email and company_email.lower() not in {address.lower() for address in to_recipients}:
     msg["Reply-To"] = company_email
-  msg.set_content(text_body or "Please see the attached invoice.")
-  msg.add_alternative(html_body or "<p>Please see the attached invoice.</p>", subtype="html")
+  msg.set_content(text_body or f"Please see the attached {document_label}.")
+  msg.add_alternative(html_body or f"<p>Please see the attached {html.escape(document_label)}.</p>", subtype="html")
   html_part = msg.get_payload()[-1]
   for item in inline_images or []:
     file_info = file_bytes_and_mime(item.get("path"))
@@ -2780,12 +2905,12 @@ def send_invoice_email_message(settings: dict, to_email: str, subject: str, html
       server.ehlo()
       if smtp_username:
         server.login(smtp_username, smtp_password)
-      server.send_message(msg)
+      server.send_message(msg, from_addr=from_email, to_addrs=all_recipients)
   else:
     with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30, context=ssl.create_default_context()) as server:
       if smtp_username:
         server.login(smtp_username, smtp_password)
-      server.send_message(msg)
+      server.send_message(msg, from_addr=from_email, to_addrs=all_recipients)
 
 
 def _archived_period_starts(conn) -> set[str]:
@@ -2991,15 +3116,43 @@ def cc_cards_for_paycheck(conn, payday_iso: str, side: str = "personal"):
 
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
+from cloud_backup import register as register_cloud_backup
+from db import DB_PATH
+register_cloud_backup(app, DB_PATH)
 
 @app.get("/")
 def index():
   return render_template("index.html", title=APP_TITLE)
 
 
+BUSINESS_PAGES = [
+  {"key": "profile", "label": "Business Profile", "path": "/business/profile", "icon": "BP"},
+  {"key": "import", "label": "QuickBooks Import", "path": "/business/import", "icon": "QI"},
+  {"key": "customers", "label": "Customers", "path": "/business/customers", "icon": "CU"},
+  {"key": "products", "label": "Products & Services", "path": "/business/products", "icon": "PS"},
+  {"key": "document-editor", "label": "Estimate / Invoice Editor", "path": "/business/document-editor", "icon": "EI"},
+  {"key": "invoice-reports", "label": "Invoice Reports", "path": "/business/invoice-reports", "icon": "IR"},
+  {"key": "documents", "label": "Documents", "path": "/business/documents", "icon": "DO"},
+  {"key": "communications", "label": "Email & SMS", "path": "/business/communications", "icon": "ES"},
+]
+BUSINESS_PAGE_KEYS = {page["key"] for page in BUSINESS_PAGES}
+
+
 @app.get("/business")
 def business_index():
-  return render_template("business.html", title="S-Books")
+  return redirect("/business/profile")
+
+
+@app.get("/business/<page_key>")
+def business_page(page_key):
+  if page_key not in BUSINESS_PAGE_KEYS:
+    return redirect("/business/profile")
+  return render_template(
+    "business.html",
+    title="S-Books",
+    active_business_page=page_key,
+    business_pages=BUSINESS_PAGES,
+  )
 
 @app.get("/static/<path:path>")
 def static_proxy(path):
@@ -3207,6 +3360,7 @@ def list_documents():
       "d.source_system", "d.source_id",
     ]
     optional_defaults = {
+      "amount_paid": "0",
       "payment_url": "NULL",
       "cloud_public_id": "NULL",
       "cloud_sync_status": "'local_only'",
@@ -3256,6 +3410,8 @@ def list_documents():
       "tax_rate": float(row["tax_rate"] or 0),
       "tax_amount": float(row["tax_amount"] or 0),
       "total": float(row["total"] or 0),
+      "amount_paid": round(float(row["amount_paid"] or 0), 2) if "amount_paid" in row.keys() else 0,
+      "balance_due": round(max(float(row["total"] or 0) - float(row["amount_paid"] or 0), 0), 2) if "amount_paid" in row.keys() else float(row["total"] or 0),
       "imported": bool(row["imported"]),
       "source_system": row["source_system"],
       "source_id": row["source_id"],
@@ -3306,16 +3462,20 @@ def get_document_email_draft(document_id: int):
     document = fetch_document(conn, document_id)
     if not document:
       return json_error("Document not found", 404)
-    if document["type"] != "invoice":
-      return json_error("Only invoices can be sent by email", 400)
+    if document["type"] not in {"invoice", "estimate"}:
+      return json_error("Only invoices and estimates can be sent by email", 400)
     settings = business_settings_dict(conn)
-    if hosted_payments_are_configured(settings):
+    if document["type"] == "estimate":
+      ensure_estimate_acceptance_ready(conn, document, settings)
+      decorate_document_acceptance(document, settings, fallback_base=request.url_root)
+    elif hosted_payments_are_configured(settings):
       try:
         publish_invoice_to_hosted_payments(conn, document, settings)
       except Exception:
         if not document.get("cloud_public_id"):
           document["cloud_sync_status"] = "sync_failed"
-    ensure_document_payment_url(conn, document, settings, persist=False)
+    if document["type"] == "invoice":
+      ensure_document_payment_url(conn, document, settings, persist=False)
     draft = build_invoice_email_draft(document, settings)
   return jsonify({"ok": True, "draft": draft, "document": document})
 
@@ -3396,31 +3556,43 @@ def send_document_email(document_id: int):
       document = fetch_document(conn, document_id)
       if not document:
         return json_error("Document not found", 404)
-      if document["type"] != "invoice":
-        return json_error("Only invoices can be sent by email", 400)
+      if document["type"] not in {"invoice", "estimate"}:
+        return json_error("Only invoices and estimates can be sent by email", 400)
       settings = business_settings_dict(conn)
-      if hosted_payments_are_configured(settings):
+      if document["type"] == "estimate":
+        ensure_estimate_acceptance_ready(conn, document, settings)
+        decorate_document_acceptance(document, settings, fallback_base=request.url_root)
+      elif hosted_payments_are_configured(settings):
         try:
           publish_invoice_to_hosted_payments(conn, document, settings)
         except Exception:
           if not document.get("cloud_public_id"):
             document["cloud_sync_status"] = "sync_failed"
-      ensure_document_payment_url(conn, document, settings, persist=False)
+      if document["type"] == "invoice":
+        ensure_document_payment_url(conn, document, settings, persist=False)
       draft = build_invoice_email_draft(document, settings)
       to_email = clean_text(payload.get("to") or draft["to"])
+      cc_emails = payload.get("cc") or draft.get("cc") or ""
+      send_copy = parse_bool(payload.get("send_copy"), True)
+      copy_to = clean_text(payload.get("copy_to") or draft.get("copy_to") or DEFAULT_EMAIL_COPY_TO)
+      bcc_emails = [copy_to] if send_copy and copy_to else []
       subject = clean_text(payload.get("subject") or draft["subject"])
       html_body = payload.get("html") or draft["html"]
       text_body = payload.get("text") or draft["text"]
       pdf_bytes = render_document_pdf_bytes(document, settings)
+      document_label = "estimate" if document["type"] == "estimate" else "invoice"
       send_invoice_email_message(
         settings=settings,
         to_email=to_email,
+        cc_emails=cc_emails,
+        bcc_emails=bcc_emails,
         subject=subject,
         html_body=html_body,
         text_body=text_body,
         pdf_name=f"{document['number']}.pdf",
         pdf_bytes=pdf_bytes,
         inline_images=draft.get("inline_images"),
+        document_label=document_label,
       )
       try:
         conn.execute(
@@ -3429,7 +3601,7 @@ def send_document_email(document_id: int):
         )
       except Exception:
         pass
-    return jsonify({"ok": True, "message": f"Invoice emailed to {to_email}"})
+    return jsonify({"ok": True, "message": f"{document_label.title()} emailed to {to_email}"})
   except Exception as exc:
     try:
       with db() as conn:

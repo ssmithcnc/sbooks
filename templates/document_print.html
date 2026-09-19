@@ -303,7 +303,7 @@
           </div>
           <div class="amount-box">
             <span class="label">Amount Due</span>
-            <span class="value">${{ "%.2f"|format(document.total) }}</span>
+            <span class="value">${{ "%.2f"|format(document.balance_due if document.type == "invoice" else document.total) }}</span>
           </div>
         </div>
         <div class="meta-grid">
@@ -390,7 +390,11 @@
       <div class="totals">
         <div><span>Subtotal</span><span>${{ "%.2f"|format(document.subtotal) }}</span></div>
         <div><span>Tax ({{ "%.2f"|format(document.tax_rate) }}%)</span><span>${{ "%.2f"|format(document.tax_amount) }}</span></div>
-        <div class="total"><span>Total</span><span>${{ "%.2f"|format(document.total) }}</span></div>
+        <div><span>Total</span><span>${{ "%.2f"|format(document.total) }}</span></div>
+        {% if document.type == "invoice" and document.amount_paid %}
+        <div><span>Payments received</span><span>${{ "%.2f"|format(document.amount_paid) }}</span></div>
+        {% endif %}
+        <div class="total"><span>{% if document.type == "invoice" %}Balance Due{% else %}Total{% endif %}</span><span>${{ "%.2f"|format(document.balance_due if document.type == "invoice" else document.total) }}</span></div>
       </div>
     </section>
   </div>

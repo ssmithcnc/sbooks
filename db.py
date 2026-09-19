@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS documents (
   tax_rate REAL NOT NULL DEFAULT 0,
   tax_amount REAL NOT NULL DEFAULT 0,
   total REAL NOT NULL DEFAULT 0,
+  amount_paid REAL NOT NULL DEFAULT 0,
   notes TEXT,
   terms TEXT,
   imported INTEGER NOT NULL DEFAULT 0,
@@ -342,6 +343,7 @@ def migrate_db(conn):
         tax_rate REAL NOT NULL DEFAULT 0,
         tax_amount REAL NOT NULL DEFAULT 0,
         total REAL NOT NULL DEFAULT 0,
+        amount_paid REAL NOT NULL DEFAULT 0,
         notes TEXT,
         terms TEXT,
         imported INTEGER NOT NULL DEFAULT 0,
@@ -389,6 +391,8 @@ def migrate_db(conn):
       conn.execute("ALTER TABLE documents ADD COLUMN payment_url TEXT")
     if "cloud_public_id" not in cols:
       conn.execute("ALTER TABLE documents ADD COLUMN cloud_public_id TEXT")
+    if "amount_paid" not in cols:
+      conn.execute("ALTER TABLE documents ADD COLUMN amount_paid REAL NOT NULL DEFAULT 0")
     if "cloud_sync_status" not in cols:
       conn.execute("ALTER TABLE documents ADD COLUMN cloud_sync_status TEXT NOT NULL DEFAULT 'local_only'")
     if "cloud_synced_at" not in cols:

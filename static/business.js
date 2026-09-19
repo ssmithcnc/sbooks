@@ -10,9 +10,51 @@ const state = {
   smsDraft: null,
 };
 
+function applyTheme(theme) {
+  const chosen = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = chosen;
+  localStorage.setItem("sbooksTheme", chosen);
+  const toggle = document.getElementById("themeToggle");
+  if (toggle) toggle.textContent = chosen === "light" ? "Dark Mode" : "Light Mode";
+}
+
+function initThemeToggle() {
+  applyTheme(localStorage.getItem("sbooksTheme") || "dark");
+  const toggle = document.getElementById("themeToggle");
+  if (!toggle) return;
+  toggle.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    applyTheme(next);
+  });
+}
+
+function applyBusinessMenuState(collapsed) {
+  document.body.classList.toggle("business-menu-collapsed", collapsed);
+  localStorage.setItem("sbooksBusinessMenuCollapsed", collapsed ? "1" : "0");
+  const toggle = document.getElementById("businessMenuToggle");
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    toggle.setAttribute("aria-label", collapsed ? "Expand business menu" : "Collapse business menu");
+  }
+}
+
+function initBusinessMenu() {
+  const toggle = document.getElementById("businessMenuToggle");
+  applyBusinessMenuState(localStorage.getItem("sbooksBusinessMenuCollapsed") === "1");
+  if (!toggle) return;
+  toggle.addEventListener("click", () => {
+    applyBusinessMenuState(!document.body.classList.contains("business-menu-collapsed"));
+  });
+}
+
 const $ = (sel) => document.querySelector(sel);
 const fmtMoney = (n) => Number(n || 0).toLocaleString(undefined, { style: "currency", currency: "USD" });
 const todayIso = () => new Date().toISOString().slice(0, 10);
+const businessPage = () => document.querySelector("[data-active-business-page]")?.dataset.activeBusinessPage || "profile";
+const businessPageUrl = (page, params = {}) => {
+  const query = new URLSearchParams(params);
+  return `/business/${page}${query.toString() ? `?${query.toString()}` : ""}`;
+};
 const SMTP_PRESETS = {
   custom: {
     hint: "Use this for any provider. Enter host, port, username, password, and TLS mode manually.",
@@ -124,6 +166,7 @@ function formToObject(form) {
 }
 
 function renderSettings() {
+  refreshCloudBackup();
   setFormValues($("#settingsForm"), state.settings);
   const receiptPortalBtn = $("#receiptPortalBtn");
   if (receiptPortalBtn) {
@@ -142,6 +185,39 @@ function renderSettings() {
   }
   updateSmtpProviderHint();
 }
+
+async function refreshCloudBackup() {
+  const target = document.getElementById("cloudBackupStatus");
+  if (!target) return;
+  try {
+    const result = await apiGet("/api/cloud_backup");
+    document.getElementById("cloudBackupEnabled").checked = result.enabled;
+    document.getElementById("cloudBackupDownload").hidden = !result.succeeded;
+    target.textContent = [result.enabled ? "Automatic backups on (every 15 minutes while S-Books runs)." : "Automatic backups off.",
+      result.running ? "Backup in progress." : "",
+      result.succeeded ? `Last verified backup: ${new Date(result.succeeded).toLocaleString()}.` : "No verified cloud backup yet.",
+      result.error || ""].filter(Boolean).join(" ");
+  } catch { target.textContent = "Could not check cloud backup status."; }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const enabled = document.getElementById("cloudBackupEnabled");
+  const button = document.getElementById("cloudBackupNow");
+  enabled?.addEventListener("change", async () => {
+    enabled.disabled = true;
+    try { await apiJson("/api/cloud_backup", "POST", { enabled: enabled.checked }); }
+    catch (error) { showError(error); }
+    finally { enabled.disabled = false; refreshCloudBackup(); }
+  });
+  button?.addEventListener("click", async () => {
+    button.disabled = true;
+    document.getElementById("cloudBackupStatus").textContent = "Uploading and verifying backup...";
+    try { await apiJson("/api/cloud_backup", "POST", { backup_now: true }); }
+    catch (error) { showError(error); }
+    finally { button.disabled = false; refreshCloudBackup(); }
+  });
+  setInterval(refreshCloudBackup, 30000);
+});
 
 function documentPaymentSyncMeta(document) {
   if (!document || document.type !== "invoice") {
@@ -279,6 +355,8 @@ function renderDocuments() {
       <td>${escapeHtml(d.issue_date || "")}</td>
       <td>${escapeHtml(d.status || "")}</td>
       <td>${fmtMoney(d.total)}</td>
+      <td>${d.type === "invoice" ? fmtMoney(d.amount_paid || 0) : ""}</td>
+      <td>${d.type === "invoice" ? fmtMoney(d.balance_due ?? d.total) : ""}</td>
       <td>${d.cloud_public_id ? `Hosted: ${escapeHtml(d.cloud_sync_status || "synced")}` : (d.imported ? "Imported" : "Local")}</td>
       <td class="row-actions">
         <button class="btn btn-secondary" type="button" data-edit-document="${d.id}">Edit</button>
@@ -286,7 +364,7 @@ function renderDocuments() {
         ${d.type === "estimate" && d.acceptance_url ? `<a class="btn btn-secondary" target="_blank" rel="noopener" href="${escapeAttr(d.acceptance_url)}">Accept Page</a>` : ``}
         ${d.type === "estimate" && d.deposit_invoice_document_id ? `<button class="btn btn-secondary" type="button" data-edit-document="${d.deposit_invoice_document_id}">Deposit Invoice</button>` : ``}
         ${d.type === "invoice" ? `<button class="btn btn-secondary" type="button" data-publish-document="${d.id}">${d.cloud_public_id ? "Republish Pay Link" : "Publish Pay Link"}</button>` : ``}
-        ${d.type === "invoice" ? `<button class="btn btn-secondary" type="button" data-review-email="${d.id}">Review & Send</button>` : ``}
+        <button class="btn btn-secondary" type="button" data-review-email="${d.id}">Review & Send</button>
         <a class="btn btn-secondary" target="_blank" rel="noopener" href="/api/documents/${d.id}/print">Print</a>
         <a class="btn btn-secondary" href="/api/documents/${d.id}/pdf">PDF</a>
         <button class="btn btn-secondary" type="button" data-delete-document="${d.id}">Delete</button>
@@ -294,8 +372,8 @@ function renderDocuments() {
     </tr>
   `).join("");
   $("#documentsTable").innerHTML = `
-    <thead><tr><th>Type</th><th>Number</th><th>Customer</th><th>Issue</th><th>Status</th><th>Total</th><th>Source</th><th></th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="8" class="muted">No documents yet.</td></tr>`}</tbody>
+    <thead><tr><th>Type</th><th>Number</th><th>Customer</th><th>Issue</th><th>Status</th><th>Total</th><th>Received</th><th>Balance</th><th>Source</th><th></th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="10" class="muted">No documents yet.</td></tr>`}</tbody>
   `;
 }
 
@@ -379,11 +457,15 @@ function computeTotals(lines, taxRate) {
 
 function renderDocumentTotals() {
   const taxRate = Number($("#documentForm [name='tax_rate']").value || 0);
+  const type = $("#documentForm [name='type']")?.value || "estimate";
+  const amountPaid = type === "invoice" ? Math.max(Number($("#documentForm [name='amount_paid']")?.value || 0), 0) : 0;
   const totals = computeTotals(getLineRows(), taxRate);
+  const balanceDue = Math.max(totals.total - amountPaid, 0);
   $("#documentTotals").innerHTML = `
     <div><span>Subtotal</span><b>${fmtMoney(totals.subtotal)}</b></div>
     <div><span>Tax</span><b>${fmtMoney(totals.taxAmount)}</b></div>
     <div><span>Total</span><b>${fmtMoney(totals.total)}</b></div>
+    ${type === "invoice" ? `<div><span>Received</span><b>${fmtMoney(amountPaid)}</b></div><div><span>Balance Due</span><b>${fmtMoney(balanceDue)}</b></div>` : ""}
   `;
 }
 
@@ -394,9 +476,9 @@ function lineRowHtml(line = emptyLine()) {
   return `
     <div class="line-item">
       <select data-line-product>${productOptions}</select>
-      <input type="text" data-line-description placeholder="Description" value="${escapeAttr(line.description || "")}">
+      <textarea data-line-description aria-label="Description" placeholder="Description" rows="2">${escapeHtml(line.description || "")}</textarea>
       <input type="number" data-line-qty min="0" step="0.01" value="${Number(line.quantity || 0)}">
-      <input type="number" data-line-price min="0" step="0.01" value="${Number(line.unit_price || 0)}">
+      <input type="number" data-line-price step="0.01" value="${Number(line.unit_price || 0)}">
       <label class="checkboxline inline-check">
         <input type="checkbox" data-line-taxable ${line.taxable ? "checked" : ""}>
         <span>Taxable</span>
@@ -408,8 +490,24 @@ function lineRowHtml(line = emptyLine()) {
 
 function renderDocumentLines(lines = [emptyLine()]) {
   $("#documentLines").innerHTML = lines.map((line) => lineRowHtml(line)).join("");
+  resizeLineDescriptions();
   renderDocumentTotals();
 }
+
+function resizeLineDescriptions() {
+  document.querySelectorAll("[data-line-description]").forEach((field) => {
+    if (!field.getClientRects().length) return;
+    field.style.height = "auto";
+    field.style.height = `${field.scrollHeight + 2}px`;
+  });
+}
+
+// Reflow descriptions when the viewport or sidebar changes the editor width.
+const lineDescriptionObserver = new ResizeObserver(() => resizeLineDescriptions());
+document.addEventListener("DOMContentLoaded", () => {
+  const lines = document.getElementById("documentLines");
+  if (lines) lineDescriptionObserver.observe(lines);
+});
 
 function resetCustomerForm() {
   setFormValues($("#customerForm"), { id: "", name: "", contact_name: "", email: "", phone: "", billing_address: "", notes: "", is_active: true });
@@ -429,6 +527,7 @@ function resetDocumentForm() {
     due_date: "",
     status: "draft",
     tax_rate: state.settings.default_tax_rate || 0,
+    amount_paid: "",
     notes: "",
     terms: state.settings.default_terms || "",
     accept_manual_ach: asCheckedValue(state.settings.default_accept_manual_ach),
@@ -468,43 +567,61 @@ function renderImportPreview() {
 function renderEmailComposer() {
   const panel = $("#emailComposerPanel");
   const preview = $("#emailPreview");
+  const emptyPanel = $("#communicationsEmptyPanel");
   if (!state.emailDraft) {
     panel.classList.add("hidden");
+    if (emptyPanel && !state.smsDraft) emptyPanel.classList.remove("hidden");
     preview.innerHTML = "";
     setEmailSendStatus("");
     return;
   }
   const { draft, document } = state.emailDraft;
+  const label = document.type === "estimate" ? "Estimate" : "Invoice";
   panel.classList.remove("hidden");
+  if (emptyPanel) emptyPanel.classList.add("hidden");
   setFormValues($("#emailComposerForm"), {
     document_id: document.id,
     to: draft.to || "",
+    cc: draft.cc || "",
+    send_copy: draft.send_copy ?? true,
     subject: draft.subject || "",
     html: draft.html || "",
     text: draft.text || "",
   });
-  $("#emailComposerMeta").textContent = `Invoice ${document.number} for ${document.customer.name} | ${fmtMoney(document.total)}`;
-  $("#emailPaymentLink").href = draft.payment_url || `/pay/${document.id}`;
+  $("#emailComposerMeta").textContent = `${label} ${document.number} for ${document.customer.name} | ${fmtMoney(document.total)}`;
+  if (document.type === "invoice") {
+    $("#emailComposerMeta").textContent = `${label} ${document.number} for ${document.customer.name} | Balance ${fmtMoney(document.balance_due ?? document.total)}`;
+  }
+  const emailLink = $("#emailPaymentLink");
+  const linkUrl = draft.payment_url || (document.type === "estimate" ? document.acceptance_url || "" : `/pay/${document.id}`);
+  emailLink.textContent = document.type === "estimate" ? "Open Accept Page" : "Open Payment Page";
+  emailLink.href = linkUrl || "#";
+  emailLink.classList.toggle("hidden", !linkUrl);
+  $("#friendlyReminderBtn").classList.toggle("hidden", document.type !== "invoice");
+  $("#seriousReminderBtn").classList.toggle("hidden", document.type !== "invoice");
   preview.innerHTML = draft.preview_html || draft.html || `<div class="muted">No preview available.</div>`;
 }
 
 function renderSmsComposer() {
   const panel = $("#smsComposerPanel");
   if (!panel) return;
+  const emptyPanel = $("#communicationsEmptyPanel");
   if (!state.smsDraft) {
     panel.classList.add("hidden");
+    if (emptyPanel && !state.emailDraft) emptyPanel.classList.remove("hidden");
     setSmsSendStatus("");
     return;
   }
   const { draft, document } = state.smsDraft;
   panel.classList.remove("hidden");
+  if (emptyPanel) emptyPanel.classList.add("hidden");
   setFormValues($("#smsComposerForm"), {
     document_id: document.id,
     to: draft.to || "",
     kind: draft.kind || "invoice",
     message: draft.message || "",
   });
-  $("#smsComposerMeta").textContent = `Invoice ${document.number} for ${document.customer.name} | ${fmtMoney(document.total)}`;
+  $("#smsComposerMeta").textContent = `Invoice ${document.number} for ${document.customer.name} | Balance ${fmtMoney(document.balance_due ?? document.total)}`;
 }
 
 function updateSmtpProviderHint() {
@@ -664,6 +781,7 @@ async function editDocument(id) {
     due_date: document.due_date || "",
     status: document.status,
     tax_rate: document.tax_rate,
+    amount_paid: document.amount_paid ?? "",
     notes: document.notes || "",
     terms: document.terms || "",
     accept_manual_ach: document.accept_manual_ach,
@@ -683,12 +801,15 @@ async function editDocument(id) {
   }
   renderDocumentLines(document.lines || [emptyLine()]);
   syncDocumentModeUi(document);
-  window.scrollTo({ top: $("#documentForm").offsetTop - 80, behavior: "smooth" });
+  if (businessPage() === "document-editor") {
+    window.scrollTo({ top: $("#documentForm").offsetTop - 80, behavior: "smooth" });
+  }
 }
 
 async function loadEmailDraft(id) {
   state.emailDraft = await apiGet(`/api/documents/${id}/email_draft`);
   renderEmailComposer();
+  const label = state.emailDraft.document.type === "estimate" ? "Estimate" : "Invoice";
   const sentTo = state.emailDraft.document.last_sent_to;
   const sentAt = state.emailDraft.document.last_sent_at;
   const lastError = state.emailDraft.document.last_email_error;
@@ -699,21 +820,38 @@ async function loadEmailDraft(id) {
   } else {
     setEmailSendStatus("");
   }
-  window.scrollTo({ top: $("#emailComposerPanel").offsetTop - 80, behavior: "smooth" });
+  if (businessPage() === "communications") {
+    window.scrollTo({ top: $("#emailComposerPanel").offsetTop - 80, behavior: "smooth" });
+  }
+  setStatus(`${label} email draft loaded.`);
 }
 
 async function loadReminderDraft(id, tone) {
   state.emailDraft = await apiGet(`/api/documents/${id}/reminder_draft?tone=${encodeURIComponent(tone)}`);
   renderEmailComposer();
   setEmailSendStatus("");
-  window.scrollTo({ top: $("#emailComposerPanel").offsetTop - 80, behavior: "smooth" });
+  if (businessPage() === "communications") {
+    window.scrollTo({ top: $("#emailComposerPanel").offsetTop - 80, behavior: "smooth" });
+  }
 }
 
 async function loadSmsDraft(id, kind = "invoice") {
   state.smsDraft = await apiGet(`/api/documents/${id}/sms_draft?kind=${encodeURIComponent(kind)}`);
   renderSmsComposer();
   setSmsSendStatus("");
-  window.scrollTo({ top: $("#smsComposerPanel").offsetTop - 80, behavior: "smooth" });
+  if (businessPage() === "communications") {
+    window.scrollTo({ top: $("#smsComposerPanel").offsetTop - 80, behavior: "smooth" });
+  }
+}
+
+async function loadPageDeepLink() {
+  const params = new URLSearchParams(window.location.search);
+  const editId = params.get("document_id");
+  const emailId = params.get("email_document_id");
+  const smsId = params.get("sms_document_id");
+  if (editId) await editDocument(editId);
+  if (emailId) await loadEmailDraft(emailId);
+  if (smsId) await loadSmsDraft(smsId, params.get("sms_kind") || "invoice");
 }
 
 async function publishDocumentPayment() {
@@ -756,14 +894,15 @@ async function sendInvoiceEmail() {
   const payload = formToObject(form);
   const documentId = payload.document_id;
   if (!documentId) {
-    alert("Review an invoice email first.");
+    alert("Review an invoice or estimate email first.");
     return;
   }
-  setEmailSendStatus("Sending invoice email...");
+  const label = state.emailDraft?.document?.type === "estimate" ? "estimate" : "invoice";
+  setEmailSendStatus(`Sending ${label} email...`);
   const response = await apiJson(`/api/documents/${documentId}/send_email`, "POST", payload);
   await loadAll();
   await loadEmailDraft(documentId);
-  const message = response?.message || `Invoice email sent to ${payload.to}.`;
+  const message = response?.message || `${label[0].toUpperCase()}${label.slice(1)} email sent to ${payload.to}.`;
   setStatus(message);
   setEmailSendStatus(message, "good");
 }
@@ -833,7 +972,10 @@ function bindEvents() {
   $("#resetCustomerBtn").addEventListener("click", resetCustomerForm);
   $("#resetProductBtn").addEventListener("click", resetProductForm);
   $("#resetDocumentBtn").addEventListener("click", resetDocumentForm);
-  $("#documentForm [name='type']")?.addEventListener("change", () => syncDocumentModeUi());
+  $("#documentForm [name='type']")?.addEventListener("change", () => {
+    syncDocumentModeUi();
+    renderDocumentTotals();
+  });
   $("#documentForm [name='acceptance_enabled']")?.addEventListener("change", () => syncDocumentModeUi());
   $("#addLineBtn").addEventListener("click", () => {
     $("#documentLines").insertAdjacentHTML("beforeend", lineRowHtml(emptyLine()));
@@ -841,6 +983,7 @@ function bindEvents() {
   });
 
   document.addEventListener("input", (e) => {
+    if (e.target.matches("[data-line-description]")) resizeLineDescriptions();
     if (e.target.closest("#documentForm")) renderDocumentTotals();
     if (e.target.id === "invoiceReportMonth") renderInvoiceReport();
     if (e.target.closest("#emailComposerForm")) {
@@ -855,6 +998,7 @@ function bindEvents() {
       const product = state.products.find((p) => Number(p.id) === Number(e.target.value));
       if (product) {
         line.querySelector("[data-line-description]").value = product.description || product.name;
+        resizeLineDescriptions();
         line.querySelector("[data-line-price]").value = Number(product.default_unit_price || 0);
         line.querySelector("[data-line-taxable]").checked = Boolean(product.taxable);
         renderDocumentTotals();
@@ -896,6 +1040,10 @@ function bindEvents() {
     }
     const docEdit = e.target.closest("[data-edit-document]");
     if (docEdit) {
+      if (businessPage() !== "document-editor") {
+        window.location.href = businessPageUrl("document-editor", { document_id: docEdit.dataset.editDocument });
+        return;
+      }
       await editDocument(docEdit.dataset.editDocument);
       return;
     }
@@ -914,8 +1062,11 @@ function bindEvents() {
     }
     const docReview = e.target.closest("[data-review-email]");
     if (docReview) {
+      if (businessPage() !== "communications") {
+        window.location.href = businessPageUrl("communications", { email_document_id: docReview.dataset.reviewEmail });
+        return;
+      }
       await loadEmailDraft(docReview.dataset.reviewEmail);
-      setStatus("Invoice email draft loaded.");
       return;
     }
     const docPublish = e.target.closest("[data-publish-document]");
@@ -952,10 +1103,13 @@ function showError(err) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  initThemeToggle();
+  initBusinessMenu();
   bindEvents();
   resetCustomerForm();
   resetProductForm();
   loadAll()
+    .then(() => loadPageDeepLink())
     .then(() => loadInvoiceReport())
     .catch(showError);
 });

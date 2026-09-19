@@ -1,4 +1,22 @@
-document.addEventListener('DOMContentLoaded', () => { try{ closeModal(); }catch(e){} });
+function applyTheme(theme) {
+  const chosen = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = chosen;
+  localStorage.setItem("sbooksTheme", chosen);
+  const toggle = document.getElementById("themeToggle");
+  if (toggle) toggle.textContent = chosen === "light" ? "Dark Mode" : "Light Mode";
+}
+
+function initThemeToggle() {
+  applyTheme(localStorage.getItem("sbooksTheme") || "dark");
+  const toggle = document.getElementById("themeToggle");
+  if (!toggle) return;
+  toggle.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    applyTheme(next);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => { initThemeToggle(); try{ closeModal(); }catch(e){} });
 const $ = (sel) => document.querySelector(sel);
 const fmtMoney = (n) => Number(n || 0).toLocaleString(undefined, { style: "currency", currency: "USD" });
 const fmtDate = (iso) => { try { return new Date(iso+"T00:00:00").toLocaleDateString(); } catch { return iso; } };
@@ -1057,39 +1075,117 @@ document.addEventListener("DOMContentLoaded",()=>{
 
 // Calculator Widget
 document.addEventListener("DOMContentLoaded", () => {
+  const menuToggle = document.getElementById("cashflowMenuToggle");
+  function syncMenu() {
+    const collapsed = document.body.classList.contains("business-menu-collapsed");
+    menuToggle.setAttribute("aria-expanded", String(!collapsed));
+    menuToggle.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} cashflow menu`);
+  }
+  menuToggle.addEventListener("click", () => {
+    document.body.classList.toggle("business-menu-collapsed");
+    localStorage.setItem("sbooksCashflowMenuCollapsed", document.body.classList.contains("business-menu-collapsed") ? "1" : "0");
+    syncMenu();
+  });
+  syncMenu();
   const widget = document.getElementById("calcWidget");
   const toggle = document.getElementById("calcToggle");
   const minBtn = document.getElementById("calcMinBtn");
   const display = document.getElementById("calcDisplay");
+  const copyStatus = document.getElementById("calcCopyStatus");
+  let evaluated = false;
+  toggle.style.display = "none";
 
   toggle.onclick = () => {
     widget.style.display = "block";
     toggle.style.display = "none";
+    display.focus();
   };
 
   minBtn.onclick = () => {
     widget.style.display = "none";
     toggle.style.display = "block";
+    toggle.focus();
   };
 
-  document.querySelectorAll(".calc-buttons button").forEach(btn=>{
-    btn.onclick = () => {
-      const val = btn.innerText;
-      if(val==="="){
-        try { display.value = eval(display.value); }
-        catch { display.value = "Err"; }
-      } else if(val==="C"){
-        display.value = "";
-      } else {
-        display.value += val;
+  function calculateKey(val) {
+    copyStatus.textContent = "";
+    if (val === "=") {
+      try {
+        if (!/^[\d.e+*/()\s-]+$/.test(display.value)) throw new Error("Invalid expression");
+        const result = Function(`"use strict"; return (${display.value})`)();
+        if (typeof result !== "number" || !Number.isFinite(result)) throw new Error("Invalid result");
+        display.value = String(Number(result.toPrecision(12)));
+      } catch { display.value = "Error"; }
+      evaluated = true;
+    } else if (val === "C") {
+      display.value = "";
+      evaluated = false;
+    } else if (val === "Backspace") {
+      display.value = display.value === "Error" ? "" : display.value.slice(0, -1);
+      evaluated = false;
+    } else {
+      if (display.value === "Error" || (evaluated && /[\d.(]/.test(val))) display.value = "";
+      display.value += val;
+      evaluated = false;
+    }
+  }
+
+  async function copyResult() {
+    display.focus();
+    display.select();
+    try {
+      await navigator.clipboard.writeText(display.value);
+      copyStatus.textContent = "Copied";
+    } catch {
+      copyStatus.textContent = "Press Ctrl+C to copy";
+    }
+  }
+  document.getElementById("calcCopy").addEventListener("click", copyResult);
+  widget.addEventListener("paste", (event) => {
+    event.preventDefault();
+    const text = event.clipboardData.getData("text").trim().replace(/,/g, "");
+    if (!text || !/^[\d.e+*/()\s-]+$/.test(text)) {
+      copyStatus.textContent = "Paste a number or calculation";
+      return;
+    }
+    const start = display.selectionStart;
+    const end = display.selectionEnd;
+    display.value = evaluated || display.value === "Error"
+      ? text
+      : display.value.slice(0, start) + text + display.value.slice(end);
+    evaluated = false;
+    copyStatus.textContent = "";
+    display.focus();
+    display.setSelectionRange(display.value.length, display.value.length);
+  });
+  widget.addEventListener("keydown", (event) => {
+    if (event.ctrlKey || event.metaKey) {
+      if (event.key.toLowerCase() === "c" && document.activeElement !== display) {
+        event.preventDefault();
+        copyResult();
+      } else if (event.key.toLowerCase() === "c" && display.selectionStart === display.selectionEnd) {
+        display.select();
       }
-    };
+      return;
+    }
+    if (event.altKey) return;
+    const numpadKeys = { NumpadAdd: "+", NumpadSubtract: "-", NumpadMultiply: "*", NumpadDivide: "/", NumpadDecimal: ".", NumpadEnter: "Enter", NumpadEqual: "=" };
+    const key = /^Numpad[0-9]$/.test(event.code) ? event.code.slice(-1) : numpadKeys[event.code] || event.key;
+    if (/^[0-9.+*/()-]$/.test(key) || ["Enter", "=", "Backspace", "Escape", "Delete"].includes(key)) {
+      event.preventDefault();
+      event.stopPropagation();
+      calculateKey(key === "Enter" ? "=" : ["Escape", "Delete"].includes(key) ? "C" : key);
+    }
+  });
+  document.querySelectorAll(".calc-buttons button").forEach(btn => {
+    btn.onclick = () => { calculateKey(btn.innerText); display.focus(); };
   });
 
   const header = document.getElementById("calcHeader");
   let offsetX=0, offsetY=0, dragging=false;
 
   header.onmousedown = (e)=>{
+    if (e.target.closest("button")) return;
     dragging = true;
     offsetX = e.clientX - widget.offsetLeft;
     offsetY = e.clientY - widget.offsetTop;
@@ -1099,6 +1195,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if(!dragging) return;
     widget.style.left = (e.clientX - offsetX) + "px";
     widget.style.top = (e.clientY - offsetY) + "px";
+    widget.style.bottom = "auto";
+    widget.style.right = "auto";
   };
 
   document.onmouseup = ()=> dragging=false;

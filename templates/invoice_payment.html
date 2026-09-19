@@ -71,7 +71,10 @@
     <section class="grid">
       <article class="card">
         <div class="eyebrow">Amount Due</div>
-        <div class="amount">${{ '%.2f'|format(document.total) }}</div>
+        <div class="amount">${{ '%.2f'|format(document.balance_due) }}</div>
+        {% if document.amount_paid %}
+        <div class="hint">${{ '%.2f'|format(document.amount_paid) }} already received.</div>
+        {% endif %}
         <div class="meta">
           <div><strong>Issue date</strong><br>{{ document.issue_date }}</div>
           <div><strong>Due date</strong><br>{{ document.due_date or 'On receipt' }}</div>
@@ -117,6 +120,14 @@
           <tr>
             <td></td><td></td><td class="num"><strong>Total</strong></td><td class="num"><strong>${{ '%.2f'|format(document.total) }}</strong></td>
           </tr>
+          {% if document.amount_paid %}
+          <tr>
+            <td></td><td></td><td class="num"><strong>Payments received</strong></td><td class="num"><strong>-${{ '%.2f'|format(document.amount_paid) }}</strong></td>
+          </tr>
+          <tr>
+            <td></td><td></td><td class="num"><strong>Balance due</strong></td><td class="num"><strong>${{ '%.2f'|format(document.balance_due) }}</strong></td>
+          </tr>
+          {% endif %}
         </tbody>
       </table>
     </section>
