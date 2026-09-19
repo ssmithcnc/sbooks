@@ -71,6 +71,16 @@
           <a class="btn" href="/api/cloud_backup/download" id="cloudBackupDownload" hidden>Download verified backup</a>
         </div>
       </div>
+      <div class="business-form">
+        <b>S-Books Online</b>
+        <div id="onlineSyncSetup" class="form-actions">
+          <label>Workspace owner email<input type="email" id="onlineSyncOwner" value="steve@cncpowder.com" /></label>
+          <button type="button" class="btn" id="onlineSyncConnect">Connect workspace</button>
+        </div>
+        <label class="checkboxline"><input type="checkbox" id="onlineSyncEnabled" />Sync to online books</label>
+        <div id="onlineSyncStatus" role="status" class="muted">Checking online sync...</div>
+        <div class="form-actions"><button type="button" class="btn" id="onlineSyncNow">Sync now</button></div>
+      </div>
       <form id="settingsForm" class="business-form business-form-3">
         <label>Company name
           <input type="text" name="company_name" />

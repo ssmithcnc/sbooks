@@ -3119,6 +3119,8 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 from cloud_backup import register as register_cloud_backup
 from db import DB_PATH
 register_cloud_backup(app, DB_PATH)
+from online_sync import register as register_online_sync
+register_online_sync(app, DB_PATH)
 
 @app.get("/")
 def index():

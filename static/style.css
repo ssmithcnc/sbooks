@@ -284,6 +284,7 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center}
 }
 .business-content{min-width:0;padding:16px 16px 16px 0}
 .business-page-hidden{display:none !important}
+#onlineSyncSetup[hidden]{display:none}
 .business-menu{
   position:sticky;
   top:71px;

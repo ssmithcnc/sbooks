@@ -1,0 +1,27 @@
+.app{min-height:100vh;display:grid;grid-template-columns:240px minmax(0,1fr);background:#fff;color:#172033;font:14px "Segoe UI",sans-serif}
+.collapsed{grid-template-columns:72px minmax(0,1fr)}
+.app button,.login button{border:1px solid #c7d9ed;background:#fafcff;border-radius:6px;padding:9px 12px;color:#172033;cursor:pointer}
+.app button:disabled,.login button:disabled{opacity:.55;cursor:wait}
+.sidebar{background:#edf4fd;border-right:1px solid #c7d9ed;padding:16px 10px;position:sticky;top:0;height:100vh;overflow:auto;display:flex;flex-direction:column;gap:8px}
+.sidebar h1{font-size:22px;margin:12px 4px}
+.sidebar button{text-align:left}
+.navShort{display:none}.collapsed .navShort{display:inline}.collapsed .navLabel{display:none}
+.sidebar button[aria-current]{background:#d4e5fa;border-color:#93b8e1}
+.main{min-width:0;padding:20px}
+.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.toolbar h2{font-size:20px;margin:0 auto 0 0}
+.toolbar select{margin-right:auto}
+.app input,.app select,.login input{max-width:100%;min-width:0;padding:9px;border:1px solid #c7d9ed;border-radius:6px;background:#fff;color:#172033;font:inherit}
+.summary{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;padding:16px 0;border-block:1px solid #c7d9ed;margin-bottom:22px}
+.summary strong{display:block;font-size:24px;margin-top:6px}
+.tableWrap{overflow:auto;background:#fafcff;border:1px solid #c7d9ed;border-radius:6px}
+.tableWrap table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}
+.tableWrap th{background:#d4e5fa;text-align:left;padding:12px;white-space:nowrap}
+.tableWrap td{padding:10px 12px;border-bottom:1px solid #dbe5f0;max-width:360px;overflow-wrap:anywhere;vertical-align:top}
+.tableWrap p{padding:12px}
+.detail{margin-top:24px;padding-top:20px;border-top:2px solid #c7d9ed}
+.detail dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.detail dt{color:#5f6e84;font-size:12px}.detail dd{margin:4px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
+.login{min-height:100vh;background:#fff;padding:80px max(20px,calc((100% - 360px)/2));color:#172033}
+.login h1{font-size:26px}.login form{display:grid;gap:18px}.login label{display:grid;gap:6px}.login input{width:100%}
+@media(max-width:700px){.app{grid-template-columns:72px minmax(0,1fr)}.sidebar{padding:8px}.sidebar h1{display:none}.sidebar button{text-align:center;padding:10px 4px;font-size:12px}.navLabel{display:none}.navShort{display:inline}.main{padding:12px}.detail dl{grid-template-columns:1fr}.toolbar input{width:100%}}

@@ -166,6 +166,7 @@ function formToObject(form) {
 }
 
 function renderSettings() {
+  refreshOnlineSync();
   refreshCloudBackup();
   setFormValues($("#settingsForm"), state.settings);
   const receiptPortalBtn = $("#receiptPortalBtn");
@@ -201,6 +202,20 @@ async function refreshCloudBackup() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  const syncEnabled = document.getElementById("onlineSyncEnabled");
+  const syncNow = document.getElementById("onlineSyncNow");
+  async function changeSync(body) {
+    syncEnabled.disabled = true;
+    syncNow.disabled = true;
+    document.getElementById("onlineSyncStatus").textContent = "Syncing...";
+    try { await apiJson("/api/online_sync", "POST", body); }
+    catch (error) { showError(error); }
+    finally { await refreshOnlineSync(); }
+  }
+  syncEnabled?.addEventListener("change", () => changeSync({ enabled: syncEnabled.checked }));
+  syncNow?.addEventListener("click", () => changeSync({ sync_now: true }));
+  document.getElementById("onlineSyncConnect")?.addEventListener("click", () => changeSync({ owner_email: document.getElementById("onlineSyncOwner").value }));
+  setInterval(refreshOnlineSync, 15000);
   const enabled = document.getElementById("cloudBackupEnabled");
   const button = document.getElementById("cloudBackupNow");
   enabled?.addEventListener("change", async () => {
@@ -218,6 +233,21 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   setInterval(refreshCloudBackup, 30000);
 });
+
+async function refreshOnlineSync() {
+  const target = document.getElementById("onlineSyncStatus");
+  if (!target) return;
+  try {
+    const result = await apiGet("/api/online_sync");
+    const ready = Boolean(result.workspace_id);
+    document.getElementById("onlineSyncSetup").hidden = ready;
+    document.getElementById("onlineSyncEnabled").checked = result.enabled;
+    document.getElementById("onlineSyncEnabled").disabled = !ready || result.running;
+    document.getElementById("onlineSyncNow").disabled = !ready || result.running;
+    target.textContent = !ready ? "Workspace setup pending. Cloud backups remain separate." :
+      `${result.enabled ? "Automatic sync on" : "Automatic sync off"}. ${result.running ? "Syncing" : result.status}. ${result.last_success ? "Last verified: " + new Date(result.last_success).toLocaleString() : "No verified online sync yet"}. ${result.error || ""}`;
+  } catch { target.textContent = "Unable to check online sync."; }
+}
 
 function documentPaymentSyncMeta(document) {
   if (!document || document.type !== "invoice") {
